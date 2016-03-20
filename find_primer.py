@@ -1,14 +1,49 @@
 #!/usr/bin/env python3
 import argparse
 
+import primer3
+
 
 def main():
     args = parse_arguments()
     sequence = parse_fasta(args.FastaFile, args.sequence)
     if not sequence:
         print("Could not find the sequence")
-    else:
-        print(sequence)
+    find_primer(sequence)
+
+
+def find_primer(sequence: str):
+    primer3.setP3Globals({
+        'PRIMER_OPT_SIZE': 20,
+        'PRIMER_PICK_INTERNAL_OLIGO': 1,
+        'PRIMER_INTERNAL_MAX_SELF_END': 8,
+        'PRIMER_MIN_SIZE': 18,
+        'PRIMER_MAX_SIZE': 25,
+        'PRIMER_OPT_TM': 60.0,
+        'PRIMER_MIN_TM': 57.0,
+        'PRIMER_MAX_TM': 63.0,
+        'PRIMER_MIN_GC': 20.0,
+        'PRIMER_MAX_GC': 80.0,
+        'PRIMER_MAX_POLY_X': 100,
+        'PRIMER_INTERNAL_MAX_POLY_X': 100,
+        'PRIMER_SALT_MONOVALENT': 50.0,
+        'PRIMER_DNA_CONC': 50.0,
+        'PRIMER_MAX_NS_ACCEPTED': 0,
+        'PRIMER_MAX_SELF_ANY': 12,
+        'PRIMER_MAX_SELF_END': 8,
+        'PRIMER_PAIR_MAX_COMPL_ANY': 12,
+        'PRIMER_PAIR_MAX_COMPL_END': 8,
+        'PRIMER_PRODUCT_SIZE_RANGE': [[75, 100], [100, 125], [125, 150],
+                                      [150, 175], [175, 200], [200, 225]],
+    })
+
+    sequence = sequence.replace('\n', '').replace('\r', '')
+    res = primer3.bindings.designPrimers({
+        'SEQUENCE_ID': 'mySequence',
+        'SEQUENCE_TEMPLATE': sequence,
+        'SEQUENCE_INCLUDED_REGION': [36, 342]
+    })
+    print(res)
 
 
 def parse_arguments():
@@ -58,7 +93,6 @@ def parse_fasta(fastaFile: argparse.FileType, seq_id: str):
             seq += line
 
     return seq
-
 
 
 if __name__ == "__main__":
