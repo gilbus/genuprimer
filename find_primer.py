@@ -5,7 +5,10 @@ import argparse
 def main():
     args = parse_arguments()
     sequence = parse_fasta(args.FastaFile, args.sequence)
-    print(sequence)
+    if not sequence:
+        print("Could not find the sequence")
+    else:
+        print(sequence)
 
 
 def parse_arguments():
@@ -32,12 +35,14 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def parse_fasta(fastaFile: argparse.FileType, sequence: str):
+def parse_fasta(fastaFile: argparse.FileType, seq_id: str):
     """
     Parses the submitted FASTA-File and extracts the sequence for primer3.
+    :param seq_id:
+    :param fastaFile:
     """
     seq = ""
-    if not sequence:
+    if not seq_id:
         fastaFile.readline()
         for line in fastaFile:
             if line in ['\n', '\r\n']:
@@ -45,7 +50,13 @@ def parse_fasta(fastaFile: argparse.FileType, sequence: str):
             seq += line
     else:
         for line in fastaFile:
-            if line
+            if line[0] == '>' and line.startswith(seq_id, 1):
+                break
+        for line in fastaFile:
+            if line in ['\n', '\r\n']:
+                break
+            seq += line
+
     return seq
 
 
