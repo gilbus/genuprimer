@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 import argparse
+import os
+import subprocess
+from typing import Dict
 
 import primer3
 
@@ -9,10 +12,27 @@ def main():
     sequence = parse_fasta(args.FastaFile, args.sequence)
     if not sequence:
         print("Could not find the sequence")
-    find_primer(sequence)
+    primer = find_primer(sequence)
+    primerfile = open('primer.fas', 'w')
+    for k in sorted(primer.keys(),
+                    key=lambda x: x.split('_')[2] + x.split('_')[1]):
+        line = ">{}\n{}\n\n".format(k, primer[k])
+        primerfile.write(line)
+    setup_bowtie(args.FastaFile, args.index)
 
 
-def find_primer(sequence: str):
+def setup_bowtie(fastaFile: str, bowtie_index: str):
+    if not bowtie_index:
+        bowtie_index_dir = 'bowtie-index'
+        os.mkdir(bowtie_index_dir)
+        subprocess.run(
+            "bowtie-build" + ' ' + fastaFile + ' ' + bowtie_index_dir + '/' +
+            fastaFile.split('.')[0] + '_bowtie')
+
+    subprocess.run(["bowtie -k 5000 -S -f", bowtie_index, "primer.fas", "primer.sam"])
+
+
+def find_primer(sequence: str) -> Dict[str, str]:
     primer3.setP3Globals({
         'PRIMER_OPT_SIZE': 20,
         'PRIMER_PICK_INTERNAL_OLIGO': 1,
@@ -25,6 +45,7 @@ def find_primer(sequence: str):
         'PRIMER_MIN_GC': 20.0,
         'PRIMER_MAX_GC': 80.0,
         'PRIMER_MAX_POLY_X': 100,
+        'PRIMER_NUM_RETURN': 7,
         'PRIMER_INTERNAL_MAX_POLY_X': 100,
         'PRIMER_SALT_MONOVALENT': 50.0,
         'PRIMER_DNA_CONC': 50.0,
@@ -42,8 +63,14 @@ def find_primer(sequence: str):
         'SEQUENCE_ID': 'mySequence',
         'SEQUENCE_TEMPLATE': sequence,
         'SEQUENCE_INCLUDED_REGION': [36, 342]
-    })
-    print(res)
+    })  # type: dict
+    primer = {}  # type: dict
+    for k in res.keys():
+        line = k.split('_')
+        if len(line) >= 4 and line[1] in ['RIGHT', 'LEFT'] and \
+                line[3] == 'SEQUENCE':
+            primer.update({k: res[k]})
+    return primer
 
 
 def parse_arguments():
@@ -66,6 +93,10 @@ def parse_arguments():
                         If omitted prefix-matching is used for identification
                         and first hit will be used.
                         """
+                        )
+    parser.add_argument('-i', '--index', type=str, default=None,
+                        help="""Use existing bowtie-index. This option is
+                        directly forwarded to bowtie."""
                         )
     return parser.parse_args()
 
