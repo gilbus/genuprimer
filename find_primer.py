@@ -25,7 +25,7 @@ def main():
     run_bowtie(args.FastaFile, bowtie_index)
 
 
-def setup_bowtie(fasta_file: str):
+def setup_bowtie(fasta_file: str) -> str:
     import re
     bowtie_index_dir = 'bowtie-index'
     os.makedirs(bowtie_index_dir, exist_ok=True)
