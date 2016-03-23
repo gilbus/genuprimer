@@ -39,6 +39,7 @@ pip-delete-this-directory.txt
 .idea/
 coryneseq/
 primer.*
+bowtie-index/
 # Unit test / coverage reports
 htmlcov/
 .tox/
