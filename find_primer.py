@@ -25,15 +25,16 @@ def main():
     run_bowtie(args.FastaFile, bowtie_index)
 
 
-def setup_bowtie(fastaFile: str):
+def setup_bowtie(fasta_file: str):
+    import re
     bowtie_index_dir = 'bowtie-index'
-    os.mkdir(bowtie_index_dir)
+    os.makedirs(bowtie_index_dir, exist_ok=True)
     bowtie_index = "{index_dir}/{prefix}_bowtie".format(
         index_dir=bowtie_index_dir,
         prefix=
-        str(fastaFile).split('.')[0])
+        re.split("/|\.", fasta_file.name)[-2])
     subprocess.run(
-        "bowtie-build {fastaFile} {index_dir]".format(fastaFile=str(fastaFile),
+        "bowtie-build {fastaFile} {index_dir}".format(fastaFile=fasta_file.name,
                                                       index_dir=bowtie_index),
         shell=True)
     return bowtie_index
