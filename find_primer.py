@@ -2,14 +2,14 @@
 import argparse
 import os
 import subprocess
-from typing import Dict
+from typing import Dict, Tuple
 
 import primer3
 
 
 def main():
     args = parse_arguments()
-    sequence = parse_fasta(args.FastaFile, args.sequence)
+    sequence, sequence_id = parse_fasta(args.FastaFile, args.sequence)
     if not sequence:
         print("Could not find the sequence")
     primer = find_primer(sequence)
@@ -18,18 +18,32 @@ def main():
                     key=lambda x: x.split('_')[2] + x.split('_')[1]):
         line = ">{}\n{}\n\n".format(k, primer[k])
         primerfile.write(line)
-    setup_bowtie(args.FastaFile, args.index)
-
-
-def setup_bowtie(fastaFile: str, bowtie_index: str):
+    primerfile.close()
+    bowtie_index = args.index
     if not bowtie_index:
-        bowtie_index_dir = 'bowtie-index'
-        os.mkdir(bowtie_index_dir)
-        subprocess.run(
-            "bowtie-build" + ' ' + fastaFile + ' ' + bowtie_index_dir + '/' +
-            fastaFile.split('.')[0] + '_bowtie')
+        bowtie_index = setup_bowtie(args.FastaFile)
+    run_bowtie(args.FastaFile, bowtie_index)
 
-    subprocess.run(["bowtie -k 5000 -S -f", bowtie_index, "primer.fas", "primer.sam"])
+
+def setup_bowtie(fastaFile: str):
+    bowtie_index_dir = 'bowtie-index'
+    os.mkdir(bowtie_index_dir)
+    bowtie_index = "{index_dir}/{prefix}_bowtie".format(
+        index_dir=bowtie_index_dir,
+        prefix=
+        str(fastaFile).split('.')[0])
+    subprocess.run(
+        "bowtie-build {fastaFile} {index_dir]".format(fastaFile=str(fastaFile),
+                                                      index_dir=bowtie_index),
+        shell=True)
+    return bowtie_index
+
+
+def run_bowtie(fasta_file: str, bowtie_index: str):
+    subprocess.run(
+        "bowtie -k 5000 -S -f {index} primer.fas --sam-nohead".format(
+            index=bowtie_index),
+        shell=True)
 
 
 def find_primer(sequence: str) -> Dict[str, str]:
@@ -101,7 +115,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def parse_fasta(fastaFile: argparse.FileType, seq_id: str):
+def parse_fasta(fastaFile: argparse.FileType, seq_id: str) -> Tuple[str, str]:
     """
     Parses the submitted FASTA-File and extracts the sequence for primer3.
     :param seq_id:
@@ -109,7 +123,7 @@ def parse_fasta(fastaFile: argparse.FileType, seq_id: str):
     """
     seq = ""
     if not seq_id:
-        fastaFile.readline()
+        seq_id = fastaFile.readline()[1:]
         for line in fastaFile:
             if line in ['\n', '\r\n']:
                 break
@@ -123,7 +137,7 @@ def parse_fasta(fastaFile: argparse.FileType, seq_id: str):
                 break
             seq += line
 
-    return seq
+    return seq, seq_id
 
 
 if __name__ == "__main__":
