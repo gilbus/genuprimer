@@ -49,10 +49,10 @@ def run_bowtie(fasta_file: str, bowtie_index: str):
 
 def find_primer(sequence: str) -> Dict[str, str]:
     primer3.setP3Globals({
-        'PRIMER_OPT_SIZE': 20,
+        'PRIMER_OPT_SIZE': 16,
         'PRIMER_PICK_INTERNAL_OLIGO': 1,
         'PRIMER_INTERNAL_MAX_SELF_END': 8,
-        'PRIMER_MIN_SIZE': 18,
+        'PRIMER_MIN_SIZE': 16,
         'PRIMER_MAX_SIZE': 25,
         'PRIMER_OPT_TM': 60.0,
         'PRIMER_MIN_TM': 57.0,
