@@ -12,13 +12,19 @@ def main():
     sequence, sequence_id = parse_fasta(args.FastaFile, args.sequence)
     if not sequence:
         print("Could not find the sequence")
-    primer = find_primer(sequence)
-    primerfile = open('primer.fas', 'w')
-    for k in sorted(primer.keys(),
+    primer_left, primer_right = find_primer(sequence)
+    primerfile_left = open('primer_left.fas', 'w')
+    primerfile_right = open('primer_right.fas', 'w')
+    for k in sorted(primer_left.keys(),
                     key=lambda x: x.split('_')[2] + x.split('_')[1]):
-        line = ">{}\n{}\n\n".format(k, primer[k])
-        primerfile.write(line)
-    primerfile.close()
+        line = ">{}\n{}\n\n".format(k, primer_left[k])
+        primerfile_left.write(line)
+    primerfile_left.close()
+    for k in sorted(primer_right.keys(),
+                    key=lambda x: x.split('_')[2] + x.split('_')[1]):
+        line = ">{}\n{}\n\n".format(k, primer_right[k])
+        primerfile_right.write(line)
+    primerfile_right.close()
     bowtie_index = args.index
     if not bowtie_index:
         bowtie_index = setup_bowtie(args.FastaFile)
@@ -79,13 +85,18 @@ def find_primer(sequence: str) -> Dict[str, str]:
         'SEQUENCE_TEMPLATE': sequence,
         'SEQUENCE_INCLUDED_REGION': [36, 342]
     })  # type: dict
-    primer = {}  # type: dict
+    primer_left = {}  # type: dict
+    primer_right = {}  # type: dict
     for k in res.keys():
         line = k.split('_')
-        if len(line) >= 4 and line[1] in ['RIGHT', 'LEFT'] and \
-                line[3] == 'SEQUENCE':
-            primer.update({k: res[k]})
-    return primer
+        if len(line) >= 4:
+            if line[1] in ['RIGHT'] and \
+                    line[3] == 'SEQUENCE':
+                primer_right.update({k: res[k]})
+            elif line[1] in ['LEFT'] and \
+                    line[3] == 'SEQUENCE':
+                primer_left.update({k: res[k]})
+    return primer_left, primer_right
 
 
 def parse_arguments():
