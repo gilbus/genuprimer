@@ -48,14 +48,14 @@ def setup_bowtie(fasta_file: str) -> str:
 
 def run_bowtie(fasta_file: str, bowtie_index: str):
     subprocess.run(
-        "bowtie -k 5000 -S -f {index} primer.fas --sam-nohead".format(
+        "bowtie -k 5000 -S -f {index} -1 primer_left.fas -2 primer_right.fas --sam-nohead".format(
             index=bowtie_index),
         shell=True)
 
 
 def find_primer(sequence: str) -> Dict[str, str]:
     primer3.setP3Globals({
-        'PRIMER_OPT_SIZE': 16,
+        'PRIMER_OPT_SIZE': 14,
         'PRIMER_PICK_INTERNAL_OLIGO': 1,
         'PRIMER_INTERNAL_MAX_SELF_END': 8,
         'PRIMER_MIN_SIZE': 16,
