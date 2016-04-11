@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import argparse
-import os
+import os, sys
 import subprocess
+import configparser
 from typing import Dict, Tuple
 
 import primer3
@@ -11,8 +12,9 @@ def main():
     args = parse_arguments()
     sequence, sequence_id = parse_fasta(args.FastaFile, args.sequence)
     if not sequence:
-        print("Could not find the sequence")
-    primer_left, primer_right = find_primer(sequence)
+        sys.exit(
+            "Could not find sequence with given ID-Prefix")
+    primer_left, primer_right = find_primer(sequence, args.config)
     primerfile_left = open('primer_left.fas', 'w')
     primerfile_right = open('primer_right.fas', 'w')
     for k in sorted(primer_left.keys(),
@@ -53,32 +55,22 @@ def run_bowtie(fasta_file: str, bowtie_index: str):
         shell=True)
 
 
-def find_primer(sequence: str) -> Dict[str, str]:
-    primer3.setP3Globals({
-        'PRIMER_OPT_SIZE': 14,
-        'PRIMER_PICK_INTERNAL_OLIGO': 1,
-        'PRIMER_INTERNAL_MAX_SELF_END': 8,
-        'PRIMER_MIN_SIZE': 16,
-        'PRIMER_MAX_SIZE': 25,
-        'PRIMER_OPT_TM': 60.0,
-        'PRIMER_MIN_TM': 57.0,
-        'PRIMER_MAX_TM': 63.0,
-        'PRIMER_MIN_GC': 20.0,
-        'PRIMER_MAX_GC': 80.0,
-        'PRIMER_MAX_POLY_X': 100,
-        'PRIMER_NUM_RETURN': 7,
-        'PRIMER_INTERNAL_MAX_POLY_X': 100,
-        'PRIMER_SALT_MONOVALENT': 50.0,
-        'PRIMER_DNA_CONC': 50.0,
-        'PRIMER_MAX_NS_ACCEPTED': 0,
-        'PRIMER_MAX_SELF_ANY': 12,
-        'PRIMER_MAX_SELF_END': 8,
-        'PRIMER_PAIR_MAX_COMPL_ANY': 12,
-        'PRIMER_PAIR_MAX_COMPL_END': 8,
-        'PRIMER_PRODUCT_SIZE_RANGE': [[75, 100], [100, 125], [125, 150],
-                                      [150, 175], [175, 200], [200, 225]],
-    })
+def find_primer(sequence, configfile):
+    config = configparser.ConfigParser()
+    config.read(configfile.name)
+    primer3_config_dict = {} # type: dict
+    value = 0
+    for k in config['primer3'].keys():
+        try:
+            # if it is a int, treat it as such
+            value = int(config['primer3'][k])
+        except ValueError:
+            # not int -> must be float
+            value = float(config['primer3'][k])
+        primer3_config_dict.update({str(k).upper(): value})
+    primer3.setP3Globals(primer3_config_dict)
 
+    # remove any newlines or anything else like that
     sequence = sequence.replace('\n', '').replace('\r', '')
     res = primer3.bindings.designPrimers({
         'SEQUENCE_ID': 'mySequence',
@@ -123,16 +115,31 @@ def parse_arguments():
     parser.add_argument('-i', '--index', type=str, default=None,
                         help="""Use existing bowtie-index. This option is
                         directly forwarded to bowtie."""
-                        )
+                       )
+    parser.add_argument('-c', '--config', type=argparse.FileType("r"),
+                        help="""Configfile with various parameters which are
+                        passed through to primer3. Has to include a
+                        'default'-section
+                        at top of the file and a 'primer3' with the settings.
+                        Non-working example:
+
+                        [default]
+
+                        # other settings
+
+
+                        [primer3]
+                        PRIMER_OPT_SIZE = 14,
+                        """, required=True)
     return parser.parse_args()
 
 
-def parse_fasta(fastaFile: argparse.FileType, seq_id: str) -> Tuple[str, str]:
+def parse_fasta(fastaFile, seq_id):
     """
     Parses the submitted FASTA-File and extracts the sequence for primer3.
     :param seq_id:
-    :param fastaFile:
-    """
+        :param fastaFile:
+            """
     seq = ""
     if not seq_id:
         seq_id = fastaFile.readline()[1:]
