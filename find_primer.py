@@ -16,7 +16,7 @@ def main():
     # parse all arguments, let the argparse-module do its wonderful work
     args = parse_arguments()
     # extract sequence from sequences
-    sequence, sequence_id = parse_fasta(args.FastaFile, args.sequence)
+    sequence = parse_fasta(args.FastaFile, args.sequence)
     if not sequence:
         sys.exit("Could not find sequence with given ID-Prefix")
     primer_left, primer_right = find_primer(sequence, args.config)
@@ -105,6 +105,11 @@ def find_primer(sequence, configfile):
 
 
 def parse_arguments():
+    """
+    This function parses the commandline arguments via the argparse-module, which additionally generates
+    a help-hook, if a parameter is passed wrong.
+    :return: A parser-object containing all parsed values.
+    """
     parser = argparse.ArgumentParser(
         description=
         """
@@ -153,8 +158,10 @@ def parse_arguments():
         Non-working example:
         [default]
         # other settings
+
         [primer3]
         PRIMER_OPT_SIZE = 14,
+        # more settings
         """, required=True)
     return parser.parse_args()
 
@@ -162,26 +169,34 @@ def parse_arguments():
 def parse_fasta(fasta_file, seq_id):
     """
     Parses the submitted FASTA-File and extracts the sequence for primer3.
-    :param seq_id: lala
-    :param fasta_file: lala
+    :type fasta_file: argparse.FileType
+    :type seq_id: str
+    :param seq_id: identifier of the sequence, for which primers should be generated
+    :param fasta_file: already readable-opened file which contains all the sequences
     """
     seq = ""
+    # no sequence-id specified, therefore the first one is taken
     if not seq_id:
+        # fasta-style-id is found after the first sign ('>')
         seq_id = fasta_file.readline()[1:]
         for line in fasta_file:
+            # read as long as no newline appears
             if line in ['\n', '\r\n']:
                 break
             seq += line
+    # a sequence-id has been passed to the programm
     else:
         for line in fasta_file:
+            # begin of a new sequence and prefix-matching says true
             if line[0] == '>' and line.startswith(seq_id, 1):
                 break
         for line in fasta_file:
+            # again, read as long as no newline appears
             if line in ['\n', '\r\n']:
                 break
             seq += line
 
-    return seq, seq_id
+    return seq
 
 
 if __name__ == "__main__":
