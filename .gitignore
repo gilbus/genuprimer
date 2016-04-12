@@ -35,6 +35,8 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 
+*_right.fas
+*_left.fas
 *.swp
 .idea/
 coryneseq/
