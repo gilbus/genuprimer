@@ -21,9 +21,9 @@ def main():
         sys.exit("Could not find sequence with given ID-Prefix")
     primer_left, primer_right = find_primer(sequence, args.config)
     primerfile_left = open('{prefix}_left.fas'.format(prefix=args.primerfiles),
-                           'w')
+                           'x')
     primerfile_right = open(
-        '{prefix}_right.fas'.format(prefix=args.primerfiles), 'w')
+        '{prefix}_right.fas'.format(prefix=args.primerfiles), 'x')
     for k in sorted(primer_left.keys(),
                     key=lambda x: x.split('_')[2] + x.split('_')[1]):
         line = ">{}\n{}\n\n".format(k, primer_left[k])
@@ -37,7 +37,7 @@ def main():
     bowtie_index = args.index
     if not bowtie_index:
         bowtie_index = setup_bowtie(args.FastaFile)
-    run_bowtie(args.FastaFile, bowtie_index)
+    run_bowtie(bowtie_index, args.primerfiles, args.bowtie)
 
 
 def setup_bowtie(fasta_file):
@@ -56,11 +56,20 @@ def setup_bowtie(fasta_file):
     return bowtie_index
 
 
-def run_bowtie(fasta_file: str, bowtie_index: str):
-    subprocess.call(
-        ["bowtie", "-k", "5000", "-S", "-f", bowtie_index, "-1",
-         "primer_left.fas", "-2", "primer_right.fas", "--sam-nohead"]
+def run_bowtie(bowtie_index, files_prefix, bowtie_exec):
+    """
+    Calls bowtie to execute the search for matches of the designed primers with other sequences.
+    :param bowtie_index: location of the index for bowtie
+    :param files_prefix: the prefix of the files containing the primer
+    :return:
+    """
+    left = "{}_left.fas".format(files_prefix)
+    right = "{}_right.fas".format(files_prefix)
+    res = subprocess.check_output(
+        [bowtie_exec.name, "-k", "5000", "-S", "-f", bowtie_index, "-1",
+         left, "-2", right, "--sam-nohead"]
     )
+    print(str(res))
 
 
 def find_primer(sequence, configfile):
@@ -70,10 +79,13 @@ def find_primer(sequence, configfile):
     :param configfile: Configfile containing the settings for primer3
     :return: The separated primer-pairs.
     """
+    # Parsing of the config file to get primer3-settings
     config = configparser.ConfigParser()
     config.read(configfile.name)
     primer3_config_dict = {}  # type: dict
     for k in config['primer3'].keys():
+        # Values are either ints or floats, but the primer3-module does not
+        # a float where an int is required
         try:
             # if it is a int, treat it as such
             value = int(config['primer3'][k])
@@ -81,6 +93,7 @@ def find_primer(sequence, configfile):
             # not int -> must be float
             value = float(config['primer3'][k])
         primer3_config_dict.update({str(k).upper(): value})
+    # set global primer3-settings which would be reused in another run
     primer3.setP3Globals(primer3_config_dict)
 
     # remove any newlines or anything else like that
@@ -94,6 +107,7 @@ def find_primer(sequence, configfile):
     primer_right = {}  # type: dict
     for k in res.keys():
         line = k.split('_')
+        # only applies to keys containing primer-sequences
         if len(line) >= 4:
             if line[1] in ['RIGHT'] and \
                     line[3] == 'SEQUENCE':
@@ -135,7 +149,7 @@ def parse_arguments():
         """
     )
     parser.add_argument(
-        "-p", "--primerfiles", type=str, default="primer_", help=
+        "-p", "--primerfiles", type=str, default="primer3", help=
         """
         Prefix for the files where the primer will be stored. The suffixes will be 'left' and 'right'.
         Therefore the default remains, their names will 'primer_left.fas' and 'primer_right.fas'
@@ -155,6 +169,7 @@ def parse_arguments():
         passed through to primer3. Has to include a
         'default'-section
         at top of the file and a 'primer3' with the settings.
+        A default config is distributed with this programm.
         Non-working example:
         [default]
         # other settings
@@ -163,6 +178,14 @@ def parse_arguments():
         PRIMER_OPT_SIZE = 14,
         # more settings
         """, required=True)
+    parser.add_argument(
+        "--bowtie", type=argparse.FileType("r"),
+        default=subprocess.check_output(["which", "bowtie"]),
+        help=
+        """
+        The bowtie-executable if not in PATH.
+        """
+    )
     return parser.parse_args()
 
 
