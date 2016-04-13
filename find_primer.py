@@ -1,5 +1,6 @@
 import argparse
 import configparser
+import logging
 import os
 import subprocess
 import sys
@@ -13,11 +14,15 @@ def main():
     Delegates all tasks to the other functions.
     :return:
     """
+    # setup logging and level
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
     # parse all arguments, let the argparse-module do its wonderful work
     args = parse_arguments()
+    logging.debug('Received arguments: {}'.format(args))
     # Parsing of the config file to get primer3-settings
     config = configparser.ConfigParser()
     config.read(args.config)
+    logging.debug('Successfully read config {}'.format(args.config.name))
     # extract sequence from sequences
     sequence = parse_fasta(args.FastaFile, args.sequence)
     if not sequence:
@@ -25,8 +30,11 @@ def main():
     # are there any settings for primer3?
     if config.has_section('primer3'):
         primer3_conf = config['primer3']
+        logging.debug('Found settings for primer3, containing {}'.format(
+            primer3_conf.keys()))
     else:
         primer3_conf = None
+        logging.debug('Config contains no settings for primer3')
 
     # generate primers, dependent on sequence, primer3-configuration and names of the files containing the found primers
     generate_primer(sequence, primer3_conf, args.primerfiles)
@@ -64,7 +72,7 @@ def setup_bowtie(fasta_file):
     return bowtie_index
 
 
-def run_bowtie(bowtie_index, files_prefix, bowtie_exec):
+def run_bowtie(bowtie_index, files_prefix, bowtie_exec, bowtie_config):
     """
     Calls bowtie to execute the search for matches of the designed primers with other sequences.
     :param bowtie_exec: bowtie-executable, either default or defined by user
@@ -75,10 +83,16 @@ def run_bowtie(bowtie_index, files_prefix, bowtie_exec):
     # determine name of files where the previously found primers are stored
     left = "{}_left.fas".format(files_prefix)
     right = "{}_right.fas".format(files_prefix)
-    res = subprocess.check_output(
-        [bowtie_exec.name, "-k", "5000", "-S", "-f", bowtie_index, "-1",
-         left, "-2", right, "--sam-nohead"]
-    )
+    # base for calling bowtie
+    args = [bowtie_exec, "-k", "5000", "-S", "-f", bowtie_index, "-1",
+            left, "-2", right, "--sam-nohead"]
+    if bowtie_config is not None:
+        if bowtie_config.getint('MaxInsSize', -1) != -1:
+            args += ['-X', bowtie_config.getint('MaxInsSize')]
+        if bowtie_config.getint('MinInsSize', -1) != -1:
+            args += ['-I', bowtie_config.getint('MinInsSize')]
+    logging.debug(args)
+    res = subprocess.check_output(args)
     print(str(res).encode('UTF-8'))
 
 
@@ -212,8 +226,8 @@ def parse_arguments():
         # more settings
         """, required=True)
     parser.add_argument(
-        "--bowtie", type=argparse.FileType("r"),
-        default=subprocess.check_output(["which", "bowtie"]),
+        "--bowtie", type=str,
+        default="bowtie",
         help=
         """
         The bowtie-executable if not in PATH.
@@ -233,8 +247,10 @@ def parse_fasta(fasta_file, seq_id):
     seq = ""
     # no sequence-id specified, therefore the first one is taken
     if not seq_id:
-        # fasta-style-id is found after the first sign ('>')
-        seq_id = fasta_file.readline()[1:]
+        logging.debug('No seq_id passed, taking first sequence from {}'.format(
+            fasta_file.name))
+        # read one line to remove headerline from internal buffer
+        fasta_file.readline()
         for line in fasta_file:
             # read as long as no newline appears
             if line in ['\n', '\r\n']:
@@ -252,6 +268,7 @@ def parse_fasta(fasta_file, seq_id):
                 break
             seq += line
 
+    logging.debug('Successfully extracted sequence')
     return seq
 
 
