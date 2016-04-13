@@ -15,29 +15,35 @@ def main():
     """
     # parse all arguments, let the argparse-module do its wonderful work
     args = parse_arguments()
+    # Parsing of the config file to get primer3-settings
+    config = configparser.ConfigParser()
+    config.read(args.config)
     # extract sequence from sequences
     sequence = parse_fasta(args.FastaFile, args.sequence)
     if not sequence:
         sys.exit("Could not find sequence with given ID-Prefix")
-    primer_left, primer_right = find_primer(sequence, args.config)
-    primerfile_left = open('{prefix}_left.fas'.format(prefix=args.primerfiles),
-                           'x')
-    primerfile_right = open(
-        '{prefix}_right.fas'.format(prefix=args.primerfiles), 'x')
-    for k in sorted(primer_left.keys(),
-                    key=lambda x: x.split('_')[2] + x.split('_')[1]):
-        line = ">{}\n{}\n\n".format(k, primer_left[k])
-        primerfile_left.write(line)
-    primerfile_left.close()
-    for k in sorted(primer_right.keys(),
-                    key=lambda x: x.split('_')[2] + x.split('_')[1]):
-        line = ">{}\n{}\n\n".format(k, primer_right[k])
-        primerfile_right.write(line)
-    primerfile_right.close()
-    bowtie_index = args.index
-    if not bowtie_index:
+    # are there any settings for primer3?
+    if config.has_section('primer3'):
+        primer3_conf = config['primer3']
+    else:
+        primer3_conf = None
+
+    # generate primers, dependent on sequence, primer3-configuration and names of the files containing the found primers
+    generate_primer(sequence, primer3_conf, args.primerfiles)
+
+    # is an already existing bowtie-index specified?
+    if not args.index:
+        # no index available, so we have to create our own one
         bowtie_index = setup_bowtie(args.FastaFile)
-    run_bowtie(bowtie_index, args.primerfiles, args.bowtie)
+    else:
+        bowtie_index = args.index
+
+    # any settings for bowtie?
+    if config.has_section('bowtie'):
+        bowtie_conf = config['bowtie']
+    else:
+        bowtie_conf = None
+    run_bowtie(bowtie_index, args.primerfiles, args.bowtie, bowtie_conf)
 
 
 def setup_bowtie(fasta_file):
@@ -47,7 +53,9 @@ def setup_bowtie(fasta_file):
     """
     import re
     bowtie_index_dir = 'bowtie-index'
+    # create new directory for the index, no problem if specific folder already exists
     os.makedirs(bowtie_index_dir, exist_ok=True)
+    # determine name for index from name of the FASTA-file containing the sequences
     bowtie_index = "{index_dir}/{prefix}_bowtie".format(
         index_dir=bowtie_index_dir,
         prefix=
@@ -59,41 +67,44 @@ def setup_bowtie(fasta_file):
 def run_bowtie(bowtie_index, files_prefix, bowtie_exec):
     """
     Calls bowtie to execute the search for matches of the designed primers with other sequences.
+    :param bowtie_exec: bowtie-executable, either default or defined by user
     :param bowtie_index: location of the index for bowtie
     :param files_prefix: the prefix of the files containing the primer
     :return:
     """
+    # determine name of files where the previously found primers are stored
     left = "{}_left.fas".format(files_prefix)
     right = "{}_right.fas".format(files_prefix)
     res = subprocess.check_output(
         [bowtie_exec.name, "-k", "5000", "-S", "-f", bowtie_index, "-1",
          left, "-2", right, "--sam-nohead"]
     )
-    print(str(res))
+    print(str(res).encode('UTF-8'))
 
 
-def find_primer(sequence, configfile):
+def generate_primer(sequence, config, primer_file_prefix):
     """
     Calls the primer3-module with the settings and separates the results in left and right primer pairs.
     :param sequence: Sequence template for the primers
-    :param configfile: Configfile containing the settings for primer3
+    :param config: containing the settings for primer3
     :return: The separated primer-pairs.
     """
-    # Parsing of the config file to get primer3-settings
-    config = configparser.ConfigParser()
-    config.read(configfile.name)
     primer3_config_dict = {}  # type: dict
-    for k in config['primer3'].keys():
-        # Values are either ints or floats, but the primer3-module does not
-        # a float where an int is required
-        try:
-            # if it is a int, treat it as such
-            value = int(config['primer3'][k])
-        except ValueError:
-            # not int -> must be float
-            value = float(config['primer3'][k])
-        primer3_config_dict.update({str(k).upper(): value})
-    # set global primer3-settings which would be reused in another run
+    # are any specific settings for primer3?
+    if config is not None:
+        # if yes, we have to parse them
+        for k in config['primer3'].keys():
+            # Values are either ints or floats, but the primer3-module does not
+            # a float where an int is required
+            try:
+                # if it is a int, treat it as such
+                value = int(config['primer3'][k])
+            except ValueError:
+                # not int -> must be float
+                value = float(config['primer3'][k])
+            primer3_config_dict.update({str(k).upper(): value})
+
+    # set primer3-settings
     primer3.setP3Globals(primer3_config_dict)
 
     # remove any newlines or anything else like that
@@ -109,13 +120,35 @@ def find_primer(sequence, configfile):
         line = k.split('_')
         # only applies to keys containing primer-sequences
         if len(line) >= 4:
+            # only search for RIGHT or LEFT; MIDDLE would be available as well but
+            # we only want the primer
             if line[1] in ['RIGHT'] and \
                     line[3] == 'SEQUENCE':
                 primer_right.update({k: res[k]})
             elif line[1] in ['LEFT'] and \
                     line[3] == 'SEQUENCE':
                 primer_left.update({k: res[k]})
-    return primer_left, primer_right
+    # write the found primer to their corresponding files
+    primerfile_left = open(
+        '{prefix}_left.fas'.format(prefix=primer_file_prefix), 'x')
+    primerfile_right = open(
+        '{prefix}_right.fas'.format(prefix=primer_file_prefix), 'x')
+
+    # create function for sorting the prefixes
+    def primer_sort(x):
+        return x.split('_')[2] + x.split('_')[1]
+
+    for k in sorted(primer_left.keys(), key=primer_sort):
+        # format in FASTA-style
+        line = ">{}\n{}\n\n".format(k, primer_left[k])
+        primerfile_left.write(line)
+    primerfile_left.close()
+
+    for k in sorted(primer_right.keys(), key=primer_sort):
+        # format in FASTA-style
+        line = ">{}\n{}\n\n".format(k, primer_right[k])
+        primerfile_right.write(line)
+    primerfile_right.close()
 
 
 def parse_arguments():
