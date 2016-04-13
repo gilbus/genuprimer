@@ -1,1 +1,2 @@
 deactivate
+unalias clean
