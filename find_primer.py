@@ -30,7 +30,8 @@ def main():
         ))
     else:
         sequences = args.FastaFile
-        logging.info('No additional file with sequences for primer-generation specified')
+        logging.info(
+            'No additional file with sequences for primer-generation specified')
     # extract sequence from sequences
     sequence = parse_fasta(sequences, args.sequence)
     if not sequence:
@@ -68,7 +69,7 @@ def main():
     else:
         bowtie_conf = None
         logging.info('Config contains no settings for bowtie')
-    run_bowtie(bowtie_index, args.primerfiles, args.bowtie, bowtie_conf)
+    run_bowtie(bowtie_index, args.primerfiles, args.bowtie, bowtie_conf, args.loglevel == logging.WARNING)
 
 
 def setup_bowtie(fasta_file):
@@ -89,9 +90,10 @@ def setup_bowtie(fasta_file):
     return bowtie_index
 
 
-def run_bowtie(bowtie_index, files_prefix, bowtie_exec, bowtie_config):
+def run_bowtie(bowtie_index, files_prefix, bowtie_exec, bowtie_config, silent):
     """
     Calls bowtie to execute the search for matches of the designed primers with other sequences.
+    :param bowtie_config:
     :param bowtie_exec: bowtie-executable, either default or defined by user
     :param bowtie_index: location of the index for bowtie
     :param files_prefix: the prefix of the files containing the primer
@@ -114,8 +116,12 @@ def run_bowtie(bowtie_index, files_prefix, bowtie_exec, bowtie_config):
     else:
         logging.warning('Config contains no settings for bowtie')
     logging.debug('Calling bowtie: {}'.format(args))
-    res = subprocess.check_output(args)
-    print(res.decode('UTF-8'))
+    if silent:
+        res = subprocess.check_output(args, stderr=subprocess.PIPE).decode('utf-8').split('\n')
+    else:
+        logging.info('Bowtie result summary:')
+        res = subprocess.check_output(args).decode('utf-8').split('\n')
+    logging.debug('Bowtie-Header: {}'.format(res))
 
 
 def generate_primer(sequence, primer3_config, primer_file_prefix):
@@ -172,10 +178,18 @@ def generate_primer(sequence, primer3_config, primer_file_prefix):
                 primer_left.update({k: res[k]})
     # write the found primer to their corresponding files
     logging.debug('Opening files to write primers')
-    primerfile_left = open(
-        '{prefix}_left.fas'.format(prefix=primer_file_prefix), 'x')
-    primerfile_right = open(
-        '{prefix}_right.fas'.format(prefix=primer_file_prefix), 'x')
+    try:
+        primerfile_left = open(
+            '{prefix}_left.fas'.format(prefix=primer_file_prefix), 'x')
+        primerfile_right = open(
+            '{prefix}_right.fas'.format(prefix=primer_file_prefix), 'x')
+    except FileExistsError:
+        logging.error((
+            'Found existing files with names ({prefix}_left.fas and/or '
+            '{prefix}_right.fas) which should be used for the primerfiles. '
+            'Please remove them and start the programm again').format(
+                prefix=primer_file_prefix))
+        sys.exit('Aborting')
 
     # create function for sorting the prefixes
     def primer_sort(x):
@@ -260,6 +274,7 @@ def parse_arguments():
         '-v', '--verbose',
         help="Be verbose",
         action="store_const", dest="loglevel", const=logging.INFO,
+        default=logging.WARNING,
     )
     parser.add_argument(
         '-c', '--config', type=argparse.FileType("r"),
@@ -298,12 +313,14 @@ def parse_fasta(fasta_file, seq_id):
     :param fasta_file: already readable-opened file which contains all the sequences
     """
     seq = ""
+    seq_id_header = ""
     # no sequence-id specified, therefore the first one is taken
     if not seq_id:
-        logging.info('No seq_id passed, taking first sequence from {}'.format(
-            fasta_file.name))
         # read one line to remove headerline from internal buffer
-        fasta_file.readline()
+        seq_id_header = fasta_file.readline().split()[0][1:]
+        logging.info(
+            'No seq_id passed, taking first sequence from {} with id {}'.format(
+                fasta_file.name, seq_id_header))
         for line in fasta_file:
             # read as long as no newline appears
             if line in ['\n', '\r\n']:
@@ -311,9 +328,14 @@ def parse_fasta(fasta_file, seq_id):
             seq += line
     # a sequence-id has been passed to the programm
     else:
+        logging.info('Partial sequence-id given: {}'.format(seq_id))
         for line in fasta_file:
             # begin of a new sequence and prefix-matching says true
             if line[0] == '>' and line.startswith(seq_id, 1):
+                seq_id_header = line.split()[0][1:]
+                logging.info(
+                    'Found match of given sequence-id-prefix, using sequence with id {}'.format(
+                        seq_id_header))
                 break
         for line in fasta_file:
             # again, read as long as no newline appears
