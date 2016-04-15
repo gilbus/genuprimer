@@ -1,13 +1,27 @@
 import argparse
+import ast
 import configparser
 import logging
 import os
 import subprocess
 import sys
 from argparse import RawTextHelpFormatter
-import ast
 
 import primer3
+
+# mapping table for keys used in config-file and actual bowtie settings
+bowtie_options_translation = {
+    'MaxInsSize'.lower(): '-X',
+    'MinInsSize'.lower(): '-I',
+    'MaxMismatch'.lower(): '-v'
+}
+
+# checking whether submitted values are valid and explaining messages in case
+# they are not
+bowtie_valid_setting = {
+    'MaxMismatch'.lower(): (
+        lambda x: 0 <= x <= 3, 'Value must hold 0 <= v <= 3')
+}
 
 
 def main():
@@ -70,7 +84,8 @@ def main():
     else:
         bowtie_conf = None
         logging.info('Config contains no settings for bowtie')
-    run_bowtie(bowtie_index, args.primerfiles, args.bowtie, bowtie_conf, args.loglevel == logging.WARNING)
+    run_bowtie(bowtie_index, args.primerfiles, args.bowtie, bowtie_conf,
+               args.loglevel == logging.WARNING)
 
 
 def setup_bowtie(fasta_file):
@@ -106,23 +121,69 @@ def run_bowtie(bowtie_index, files_prefix, bowtie_exec, bowtie_config, silent):
     # base for calling bowtie
     args = [bowtie_exec, "-k", "5000", "-S", "-f", bowtie_index, "-1",
             left, "-2", right, "--sam-nohead"]
+
     # check whether settings for bowtie are available
     if bowtie_config is not None:
-        # is the key defined as int?
-        if bowtie_config.getint('MaxInsSize', -1) != -1:
-            args += ['-X', bowtie_config.get('MaxInsSize')]
-        # is the key defined as int?
-        if bowtie_config.getint('MinInsSize', -1) != -1:
-            args += ['-I', bowtie_config.get('MinInsSize')]
+        args = parse_bowtie_config(args, bowtie_config)
     else:
         logging.warning('Config contains no settings for bowtie')
+
     logging.debug('Calling bowtie: {}'.format(args))
+
     if silent:
-        res = subprocess.check_output(args, stderr=subprocess.PIPE).decode('utf-8').split('\n')
+        res = subprocess.check_output(args, stderr=subprocess.PIPE).decode(
+            'utf-8').split('\n')
     else:
         logging.info('Bowtie result summary:')
         res = subprocess.check_output(args).decode('utf-8').split('\n')
+
     logging.info('Bowtie result:\n{}'.format('\n'.join(res)))
+
+
+def parse_bowtie_config(cmd, config):
+    def is_int(x):
+        """
+        Checks whether passed value can be parsed as valid int
+        :param x: Value to check
+        :return: True if it can be parsed as int
+        """
+        return type(ast.literal_eval(x)) == int
+
+    # TODO more settings; even custom
+    # is the key defined as int?
+    for key in config.keys():
+        if is_int(config[key]):
+            if key in bowtie_valid_setting.keys():
+                (is_valid, mes) = bowtie_valid_setting[key]
+                if not is_valid(config.getint(key)):
+                    logging.warning((
+                        'Value for {conf} in config,'
+                        ' resp. {bowtie} in bowtie: {val}'
+                        ' is invalid. {msg}'
+                    ).format(
+                        conf=key, msg=mes,
+                        bowtie=bowtie_options_translation[key],
+                        val=config[key])
+                    )
+                    break
+        try:
+            cmd += [bowtie_options_translation[key],
+                    config[key]]
+        except KeyError:
+            logging.warning(
+                'Found unknown value in bowtie config: {}. Ignoring'.format(
+                    key
+                )
+            )
+        else:
+            # TODO: FIXME
+            logging.warning(
+                ('Found non-int value for {conf} in config,'
+                 ' resp. {bowtie} in bowtie: {val}').format(
+                    conf=key, bowtie=bowtie_options_translation[key],
+                    val=config[key])
+            )
+    return cmd
 
 
 def generate_primer(sequence, primer3_config, primer_file_prefix):
@@ -185,7 +246,7 @@ def generate_primer(sequence, primer3_config, primer_file_prefix):
             'Found existing files with names ({prefix}_left.fas and/or '
             '{prefix}_right.fas) which should be used for the primerfiles. '
             'Please remove them and start the programm again').format(
-                prefix=primer_file_prefix))
+            prefix=primer_file_prefix))
         sys.exit('Aborting')
 
     # create function for sorting the prefixes
