@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from argparse import RawTextHelpFormatter
+import ast
 
 import primer3
 
@@ -121,7 +122,7 @@ def run_bowtie(bowtie_index, files_prefix, bowtie_exec, bowtie_config, silent):
     else:
         logging.info('Bowtie result summary:')
         res = subprocess.check_output(args).decode('utf-8').split('\n')
-    logging.debug('Bowtie-Header: {}'.format(res))
+    logging.info('Bowtie result:\n{}'.format('\n'.join(res)))
 
 
 def generate_primer(sequence, primer3_config, primer_file_prefix):
@@ -137,14 +138,10 @@ def generate_primer(sequence, primer3_config, primer_file_prefix):
         logging.info('Parsing primer3-settings from config')
         # if yes, we have to parse them
         for k in primer3_config.keys():
-            # Values are either ints or floats, but the primer3-module does not
-            # a float where an int is required
-            try:
-                # if it is a int, treat it as such
-                value = int(primer3_config[k])
-            except ValueError:
-                # not int -> must be float
-                value = float(primer3_config[k])
+            value = ast.literal_eval(primer3_config[k])
+            logging.debug('Evaluated {key} to {v}: {t}'.format(
+                key=k, v=value, t=type(value)
+            ))
             primer3_config_dict.update({str(k).upper(): value})
         logging.debug('Final primer3-options-dictionary: {}'.format(
             [str(k) + ": " + str(primer3_config_dict[k]) for k in
