@@ -16,6 +16,9 @@ bowtie_options_translation = {
     'MaxMismatch'.lower(): '-v'
 }
 
+# 'lower()' is called since the values, once parsed from the config, are stored
+# in lowercase. But it is nicer to have the same values written in the same way
+
 # checking whether submitted values are valid and explaining messages in case
 # they are not
 bowtie_valid_setting = {
@@ -31,7 +34,17 @@ def main():
     """
     # parse all arguments, let the argparse-module do its wonderful work
     args = parse_arguments()
-    # setup logging and level
+    # setup logging and level as well as colors for logging
+    # colors are only working on linux
+    logging.addLevelName(logging.WARNING,
+                         "\033[1;31m%s\033[1;0m" % logging.getLevelName(
+                             logging.WARNING))
+    logging.addLevelName(logging.INFO,
+                         "\033[1;34m%s\033[1;0m" % logging.getLevelName(
+                             logging.INFO))
+    logging.addLevelName(logging.DEBUG,
+                         "\033[1;32m%s\033[1;0m" % logging.getLevelName(
+                             logging.DEBUG))
     logging.basicConfig(format='%(levelname)s:%(message)s', level=args.loglevel)
     logging.debug('Received arguments: {}'.format(args))
     # Parsing of the config file to get primer3-settings
@@ -48,7 +61,7 @@ def main():
         logging.info(
             'No additional file with sequences for primer-generation specified')
     # extract sequence from sequences
-    sequence = parse_fasta(sequences, args.sequence)
+    sequence, seq_id = parse_fasta(sequences, args.sequence)
     if not sequence:
         sys.exit("Could not find sequence with given ID-Prefix")
     # are there any settings for primer3?
@@ -60,16 +73,18 @@ def main():
     else:
         primer3_conf = None
         logging.warning(
-            'Config contains no settings for primer3, \
-            running primer3 with default settings.')
+            'Config contains no settings for primer3, '
+            'running primer3 with default settings.')
 
-    # generate primers, dependent on sequence, primer3-configuration and names of the files containing the found primers
-    generate_primer(sequence, primer3_conf, args.primerfiles)
+    # generate primers, dependent on sequence, primer3-configuration
+    # and names of the files containing the found primers
+    generate_primer(sequence, primer3_conf, args.primerfiles, config['default'])
 
     # is an already existing bowtie-index specified?
     if not args.index:
         # no index available, so we have to create our own one
-        bowtie_index = setup_bowtie(args.FastaFile)
+        bowtie_index = setup_bowtie(args.FastaFile,
+                                    args.loglevel == logging.DEBUG)
         logging.info("No existing index for bowtie specified")
     else:
         bowtie_index = args.index
@@ -88,27 +103,37 @@ def main():
                args.loglevel == logging.WARNING)
 
 
-def setup_bowtie(fasta_file):
+def setup_bowtie(fasta_file, debug):
     """
     If no bowtie-index is specified we have to build it
     :type fasta_file: argparse.FileType
     """
     import re
     bowtie_index_dir = 'bowtie-index'
-    # create new directory for the index, no problem if specific folder already exists
+    # create new directory for the index,
+    # no problem if specific folder already exists
     os.makedirs(bowtie_index_dir, exist_ok=True)
-    # determine name for index from name of the FASTA-file containing the sequences
+    # determine name for index from name of the
+    # FASTA-file containing the sequences
     bowtie_index = "{index_dir}/{prefix}_bowtie".format(
         index_dir=bowtie_index_dir,
         prefix=
         re.split("/|\.", fasta_file.name)[-2])
-    subprocess.call(["bowtie-build", fasta_file.name, bowtie_index])
+    args = ["bowtie-build", fasta_file.name, bowtie_index]
+    logging.info('bowtie-build command: {}'.format(args))
+    if not debug:
+        # We are not in debug-mode so no output will be shown
+        subprocess.call(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    else:
+        # debug-mode, show everything
+        subprocess.call(args)
     return bowtie_index
 
 
 def run_bowtie(bowtie_index, files_prefix, bowtie_exec, bowtie_config, silent):
     """
-    Calls bowtie to execute the search for matches of the designed primers with other sequences.
+    Calls bowtie to execute the search for matches of the designed primers with
+    other sequences.
     :param bowtie_config:
     :param bowtie_exec: bowtie-executable, either default or defined by user
     :param bowtie_index: location of the index for bowtie
@@ -147,36 +172,44 @@ def parse_bowtie_config(cmd, config):
         :param x: Value to check
         :return: True if it can be parsed as int
         """
-        return type(ast.literal_eval(x)) == int
+        try:
+            return type(ast.literal_eval(x)) == int
+        except SyntaxError:
+            return False
 
     # TODO more settings; even custom
-    # is the key defined as int?
     for key in config.keys():
+        # is the key defined as int?
         if is_int(config[key]):
+            # are there any special restrictions defined?
             if key in bowtie_valid_setting.keys():
                 (is_valid, mes) = bowtie_valid_setting[key]
+                # test for special restrictions and show warning if they
+                # do not hold
                 if not is_valid(config.getint(key)):
                     logging.warning((
                         'Value for {conf} in config,'
                         ' resp. {bowtie} in bowtie: {val}'
-                        ' is invalid. {msg}'
+                        ' is invalid. {msg}. Ignoring value.'
                     ).format(
                         conf=key, msg=mes,
                         bowtie=bowtie_options_translation[key],
                         val=config[key])
                     )
+                    # skip this value since it is invalid
                     break
-        try:
-            cmd += [bowtie_options_translation[key],
-                    config[key]]
-        except KeyError:
-            logging.warning(
-                'Found unknown value in bowtie config: {}. Ignoring'.format(
-                    key
+            # try to translate our settings name to a valid
+            # option for bowtie
+            if key in bowtie_options_translation.keys():
+                cmd += [bowtie_options_translation[key],
+                        config[key]]
+            else:
+                # option is not valid and will be ignored
+                logging.warning(
+                    ('Found unknown value in bowtie config: {}. '
+                     'Ignoring value').format(key)
                 )
-            )
         else:
-            # TODO: FIXME
             logging.warning(
                 ('Found non-int value for {conf} in config,'
                  ' resp. {bowtie} in bowtie: {val}').format(
@@ -186,11 +219,14 @@ def parse_bowtie_config(cmd, config):
     return cmd
 
 
-def generate_primer(sequence, primer3_config, primer_file_prefix):
+def generate_primer(sequence, primer3_config, primer_file_prefix, config):
     """
-    Calls the primer3-module with the settings and separates the results in left and right primer pairs.
+    Calls the primer3-module with the settings and separates the results in
+    left and right primer pairs.
+    :param primer_file_prefix: prefix for the files where the primer pairs will
+    be stored.
     :param sequence: Sequence template for the primers
-    :param config: containing the settings for primer3
+    :param primer3_config: containing the settings for primer3
     :return: The separated primer-pairs.
     """
     primer3_config_dict = {}  # type: dict
@@ -199,73 +235,108 @@ def generate_primer(sequence, primer3_config, primer_file_prefix):
         logging.info('Parsing primer3-settings from config')
         # if yes, we have to parse them
         for k in primer3_config.keys():
-            value = ast.literal_eval(primer3_config[k])
-            logging.debug('Evaluated {key} to {v}: {t}'.format(
-                key=k, v=value, t=type(value)
-            ))
-            primer3_config_dict.update({str(k).upper(): value})
+            try:
+                value = ast.literal_eval(primer3_config[k])
+                logging.debug('Evaluated {key} to {v}: {t}'.format(
+                    key=k, v=value, t=type(value)
+                ))
+                primer3_config_dict.update({str(k).upper(): value})
+            except SyntaxError:
+                logging.warning(
+                    ('Could not parse option {key} with value {v} '
+                     'from primer3-config. '
+                     'Ignoring value').format(key=k, v=primer3_config[k])
+                )
         logging.debug('Final primer3-options-dictionary: {}'.format(
             [str(k) + ": " + str(primer3_config_dict[k]) for k in
              primer3_config_dict.keys()]
         ))
 
-    # set primer3-settings
-    primer3.setP3Globals(primer3_config_dict)
+        # set primer3-settings
+        primer3.setP3Globals(primer3_config_dict)
 
-    # remove any newlines or anything else like that
-    sequence = sequence.replace('\n', '').replace('\r', '')
-    logging.info('Generating primers')
-    res = primer3.bindings.designPrimers({
-        'SEQUENCE_ID': 'mySequence',
-        'SEQUENCE_TEMPLATE': sequence,
-        'SEQUENCE_INCLUDED_REGION': [36, 342]
-    })
-    primer_left = {}  # type: dict
-    primer_right = {}  # type: dict
-    for k in res.keys():
-        line = k.split('_')
-        # only applies to keys containing primer-sequences
-        if len(line) >= 4:
-            # only search for RIGHT or LEFT; MIDDLE would be available as well but
-            # we only want the primer
-            if line[1] in ['RIGHT'] and \
-                    line[3] == 'SEQUENCE':
-                primer_right.update({k: res[k]})
-            elif line[1] in ['LEFT'] and \
-                    line[3] == 'SEQUENCE':
-                primer_left.update({k: res[k]})
-    # write the found primer to their corresponding files
-    logging.debug('Opening files to write primers')
-    try:
-        primerfile_left = open(
-            '{prefix}_left.fas'.format(prefix=primer_file_prefix), 'x')
-        primerfile_right = open(
-            '{prefix}_right.fas'.format(prefix=primer_file_prefix), 'x')
-    except FileExistsError:
-        logging.error((
-            'Found existing files with names ({prefix}_left.fas and/or '
-            '{prefix}_right.fas) which should be used for the primerfiles. '
-            'Please remove them and start the programm again').format(
-            prefix=primer_file_prefix))
-        sys.exit('Aborting')
+        # remove any newlines or anything else like that
+        sequence = sequence.replace('\n', '').replace('\r', '')
+        # extract region inside sequence to generate primers
+        seq_begin = config.getint('SEQUENCE_INCLUDED_BEGIN', -1)
+        seq_end = config.getint('SEQUENCE_INCLUDED_END', -1)
+        # is one of the values invalid?
+        if seq_begin < 0 or seq_end < 0:
+            sys.exit(
+                ('ERROR:Found non-negative or invalid values for primer'
+                 ' generation concerning the region inside '
+                 'the sequence: (SEQUENCE_INCLUDED_BEGIN,SEQUENCE_INCLUDED_END)'
+                 ' = {}. If you want to generate primers for the '
+                 'whole sequence set both values to 0. Aborting').format(
+                    (config['SEQUENCE_INCLUDED_BEGIN'],
+                     config['SEQUENCE_INCLUDED_END']))
+            )
 
-    # create function for sorting the prefixes
-    def primer_sort(x):
-        return x.split('_')[2] + x.split('_')[1]
+        # generate primers for the whole sequence?
+        if seq_begin == seq_end == 0:
+            logging.info(
+                'Generating primers for the whole sequence as requested')
+            res = primer3.bindings.designPrimers({
+                'SEQUENCE_ID': 'mySequence',
+                'SEQUENCE_TEMPLATE': sequence,
+            })
+        else:
+            logging.info(
+                'Generating primers for region {}'.format((seq_begin, seq_end)))
+            res = primer3.bindings.designPrimers({
+                'SEQUENCE_ID': 'mySequence',
+                'SEQUENCE_TEMPLATE': sequence,
+                'SEQUENCE_INCLUDED_REGION': [seq_begin, seq_end]
 
-    logging.debug('Writing left primers to {}'.format(primerfile_left.name))
-    for k in sorted(primer_left.keys(), key=primer_sort):
-        # format in FASTA-style
-        line = ">{}\n{}\n\n".format(k, primer_left[k])
-        primerfile_left.write(line)
-    primerfile_left.close()
+            })
 
-    logging.debug('Writing right primers to {}'.format(primerfile_right.name))
-    for k in sorted(primer_right.keys(), key=primer_sort):
-        # format in FASTA-style
-        line = ">{}\n{}\n\n".format(k, primer_right[k])
-        primerfile_right.write(line)
-    primerfile_right.close()
+        primer_left = {}  # type: dict
+        primer_right = {}  # type: dict
+        for k in res.keys():
+            line = k.split('_')
+            # only applies to keys containing primer-sequences
+            if len(line) >= 4:
+                # only search for RIGHT or LEFT;
+                # MIDDLE would be available as well but we only want the primer
+                if line[1] in ['RIGHT'] and \
+                        line[3] == 'SEQUENCE':
+                    primer_right.update({k: res[k]})
+                elif line[1] in ['LEFT'] and \
+                        line[3] == 'SEQUENCE':
+                    primer_left.update({k: res[k]})
+        # write the found primer to their corresponding files
+        logging.debug('Opening files to write primers')
+        try:
+            primerfile_left = open(
+                '{prefix}_left.fas'.format(prefix=primer_file_prefix), 'x')
+            primerfile_right = open(
+                '{prefix}_right.fas'.format(prefix=primer_file_prefix), 'x')
+        except FileExistsError:
+            logging.error((
+                'Found existing files with names ({prefix}_left.fas and/or '
+                '{prefix}_right.fas) which should be used for the primerfiles. '
+                'Please remove them and start the programm again').format(
+                prefix=primer_file_prefix))
+            sys.exit('Aborting')
+
+        # create function for sorting the prefixes
+        def primer_sort(x):
+            return x.split('_')[2] + x.split('_')[1]
+
+        logging.debug('Writing left primers to {}'.format(primerfile_left.name))
+        for k in sorted(primer_left.keys(), key=primer_sort):
+            # format in FASTA-style
+            line = ">{}\n{}\n\n".format(k, primer_left[k])
+            primerfile_left.write(line)
+        primerfile_left.close()
+
+        logging.debug(
+            'Writing right primers to {}'.format(primerfile_right.name))
+        for k in sorted(primer_right.keys(), key=primer_sort):
+            # format in FASTA-style
+            line = ">{}\n{}\n\n".format(k, primer_right[k])
+            primerfile_right.write(line)
+        primerfile_right.close()
 
 
 def parse_arguments():
@@ -371,7 +442,6 @@ def parse_fasta(fasta_file, seq_id):
     :param fasta_file: already readable-opened file which contains all the sequences
     """
     seq = ""
-    seq_id_header = ""
     # no sequence-id specified, therefore the first one is taken
     if not seq_id:
         # read one line to remove headerline from internal buffer
@@ -392,7 +462,8 @@ def parse_fasta(fasta_file, seq_id):
             if line[0] == '>' and line.startswith(seq_id, 1):
                 seq_id_header = line.split()[0][1:]
                 logging.info(
-                    'Found match of given sequence-id-prefix, using sequence with id {}'.format(
+                    'Found match of given sequence-id-prefix, '
+                    'using sequence with id {}'.format(
                         seq_id_header))
                 break
         for line in fasta_file:
@@ -402,7 +473,7 @@ def parse_fasta(fasta_file, seq_id):
             seq += line
 
     logging.debug('Successfully extracted sequence')
-    return seq
+    return seq, seq_id_header
 
 
 if __name__ == "__main__":
