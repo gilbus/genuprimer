@@ -37,12 +37,15 @@ def main():
     # setup logging and level as well as colors for logging
     # colors are only working on linux
     logging.addLevelName(logging.WARNING,
+                         # format red
                          "\033[1;31m%s\033[1;0m" % logging.getLevelName(
                              logging.WARNING))
     logging.addLevelName(logging.INFO,
+                         # format blue
                          "\033[1;34m%s\033[1;0m" % logging.getLevelName(
                              logging.INFO))
     logging.addLevelName(logging.DEBUG,
+                         # format green
                          "\033[1;32m%s\033[1;0m" % logging.getLevelName(
                              logging.DEBUG))
     logging.basicConfig(format='%(levelname)s:%(message)s', level=args.loglevel)
