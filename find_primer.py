@@ -91,7 +91,8 @@ def main():
         general_conf = config['default']
     # generate primers, dependent on sequence, primer3-configuration
     # and names of the files containing the found primers
-    generate_primer(sequence, primer3_conf, args.primerfiles, general_conf)
+    primer_pairs_list = generate_primer(sequence, primer3_conf,
+                                        args.primerfiles, general_conf)
 
     # is an already existing bowtie-index specified?
     if not args.index:
@@ -107,15 +108,15 @@ def main():
                                args.loglevel == logging.WARNING,
                                product_size_range)
 
-    valid_primer_tuple = []
+    results = []
     for primer_tuple in bowtie_result:
-        if is_match(primer_tuple, config['default']):
-            logging.debug('Primer tuple valid: {}'.format(primer_tuple))
-            valid_primer_tuple.append(primer_tuple)
-    logging.info('Valid matches: {}'.format(valid_primer_tuple))
+        res = parse_bowtie_result(primer_tuple, config['default'],
+                                  primer_pairs_list)
+        results.append(res)
+    logging.info('Results:\n{}'.format(results))
 
 
-def is_match(tuple, error_values):
+def parse_bowtie_result(tuple, error_values, primer_pairs_list):
     try:
         last_must_match = int(error_values['last_must_match'])
         last_to_check = int(error_values['last_to_check'])
@@ -160,7 +161,17 @@ def is_match(tuple, error_values):
 
     left_match, right_match = tuple[0].split()[12], tuple[1].split()[12]
     left, right = left_match.split(':')[2:], right_match.split(':')[2:]
-    return is_valid(left) and is_valid(right)
+    if is_valid(left) and is_valid(right):
+        infos = tuple[0].split('\t')
+        print(infos)
+        pair_number = int(infos[0].split('_')[2])
+        current_pair = primer_pairs_list[pair_number]
+        separator = '\t'
+        res = 'PRIMER_{num}{sep}{gi}{sep}{left_primer}{sep}{right_primer}'.format(
+            num=pair_number, sep=separator, gi=infos[2], left_primer=current_pair[0],
+            right_primer=current_pair[1]
+        )
+        return res
 
 
 def setup_bowtie(fasta_file, debug):
@@ -332,25 +343,19 @@ def generate_primer(sequence, primer3_config, primer_file_prefix, config):
                 primer_left.update({k: res[k]})
     # write the found primer to their corresponding files
     logging.debug('Opening files to write primers')
-    try:
-        primerfile_left = open(
-            '{prefix}_left.fas'.format(prefix=primer_file_prefix), 'x')
-        primerfile_right = open(
-            '{prefix}_right.fas'.format(prefix=primer_file_prefix), 'x')
-    except FileExistsError:
-        logging.error((
-            'Found existing files with names ({prefix}_left.fas and/or '
-            '{prefix}_right.fas) which should be used for the primerfiles. '
-            'Please remove them and start the programm again').format(
-            prefix=primer_file_prefix))
-        sys.exit('Aborting')
+    primerfile_left = open(
+        '{prefix}_left.fas'.format(prefix=primer_file_prefix), 'w')
+    primerfile_right = open(
+        '{prefix}_right.fas'.format(prefix=primer_file_prefix), 'w')
 
     # create function for sorting the prefixes
     def primer_sort(x):
         return x.split('_')[2] + x.split('_')[1]
 
+    primer_pairs_list = []
     logging.debug('Writing left primers to {}'.format(primerfile_left.name))
     for k in sorted(primer_left.keys(), key=primer_sort):
+        primer_pairs_list.append((primer_left[k],))
         # format in FASTA-style
         line = ">{}\n{}\n\n".format(k, primer_left[k])
         primerfile_left.write(line)
@@ -358,11 +363,14 @@ def generate_primer(sequence, primer3_config, primer_file_prefix, config):
 
     logging.debug(
         'Writing right primers to {}'.format(primerfile_right.name))
-    for k in sorted(primer_right.keys(), key=primer_sort):
+    for n, k in enumerate(sorted(primer_right.keys(), key=primer_sort)):
+        primer_pairs_list[n] = (primer_pairs_list[n][0], primer_right[k])
         # format in FASTA-style
         line = ">{}\n{}\n\n".format(k, primer_right[k])
         primerfile_right.write(line)
     primerfile_right.close()
+
+    return primer_pairs_list
 
 
 def parse_arguments():
