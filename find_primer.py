@@ -109,16 +109,58 @@ def main():
 
     valid_primer_tuple = []
     for primer_tuple in bowtie_result:
-        if is_bowtie_valid(primer_tuple, config['default']):
+        if is_match(primer_tuple, config['default']):
             logging.debug('Primer tuple valid: {}'.format(primer_tuple))
             valid_primer_tuple.append(primer_tuple)
+    logging.info('Valid matches: {}'.format(valid_primer_tuple))
 
 
-def is_bowtie_valid(tuple, error_values):
-    left_match, right_match = tuple[0].split()[11], tuple[1].split()[11]
-    if str in [type(left_match[-1]), type(right_match[-1])]:
-        #
-        return False
+def is_match(tuple, error_values):
+    try:
+        last_must_match = int(error_values['last_must_match'])
+        last_to_check = int(error_values['last_to_check'])
+        last_max_error = int(error_values['last_max_error'])
+    except ValueError:
+        logging.error(
+            ('One settings of {} from the config '
+             'could not be parsed as integer. Aborting').format(
+                ', '.join(MANDATORY_VALUES)
+            ))
+        sys.exit(1)
+
+    def is_valid(values):
+        logging.debug('checking: {}'.format(values))
+        # if last entry is a number it represents the number of matches at
+        # the end of the primer; must not be lower than given value
+        if type(values[-1]) == int and int(values[-1]) < last_must_match:
+            logging.debug('Failed because last_must_match not fulfilled')
+            return False
+        # if last entry is a char there is no match, unless we do not care about
+        # the entries at the end
+        elif values[-1].isalpha() and last_must_match != 0:
+            logging.debug('Failed because last char is str')
+            return False
+
+        logging.debug(
+            'last {} bases match for {}'.format(last_must_match, values))
+        # calculate the last entries to check
+        i = 1
+        number_of_subs = 0
+        while i <= last_to_check:
+            logging.debug(i)
+            current = values[-i]
+            if current.isdigit():
+                i += int(current)
+            else:
+                number_of_subs += 1
+            i += 1
+        logging.debug(
+            'Counted {} errors in {}'.format(number_of_subs, values))
+        return number_of_subs < last_max_error
+
+    left_match, right_match = tuple[0].split()[12], tuple[1].split()[12]
+    left, right = left_match.split(':')[2:], right_match.split(':')[2:]
+    return is_valid(left) and is_valid(right)
 
 
 def setup_bowtie(fasta_file, debug):
