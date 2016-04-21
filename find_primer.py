@@ -40,6 +40,10 @@ def main():
                          # format red
                          "\033[1;31m%s\033[1;0m" % logging.getLevelName(
                              logging.WARNING))
+    logging.addLevelName(logging.ERROR,
+                         # format red
+                         "\033[1;31m%s\033[1;0m" % logging.getLevelName(
+                             logging.ERROR))
     logging.addLevelName(logging.INFO,
                          # format blue
                          "\033[1;34m%s\033[1;0m" % logging.getLevelName(
@@ -52,8 +56,11 @@ def main():
     logging.debug('Received arguments: {}'.format(args))
     # Parsing of the config file to get primer3-settings
     config = configparser.ConfigParser()
-    config.read(args.config.name)
-    logging.info('Successfully read config {}'.format(args.config.name))
+    if args.config is not None:
+        config.read(args.config.name)
+        logging.info('Successfully read config {}'.format(args.config.name))
+    else:
+        logging.warning('No config file given. Using default values.')
     if args.additionalFasta is not None:
         sequences = args.additionalFasta
         logging.info('Found additional file for primer generation {}'.format(
@@ -66,7 +73,9 @@ def main():
     # extract sequence from sequences
     sequence, seq_id = parse_fasta(sequences, args.sequence)
     if not sequence:
-        sys.exit("Could not find sequence with given ID-Prefix")
+        logging.error("Could not find sequence with given ID-Prefix. Aborting")
+        sys.exit(1)
+    logging.debug('Successfully extracted sequence')
     # are there any settings for primer3?
     if config.has_section('primer3'):
         primer3_conf = config['primer3']
@@ -102,8 +111,16 @@ def main():
     else:
         bowtie_conf = None
         logging.info('Config contains no settings for bowtie')
-    run_bowtie(bowtie_index, args.primerfiles, args.bowtie, bowtie_conf,
-               args.loglevel == logging.WARNING)
+    bowtie_result = run_bowtie(bowtie_index, args.primerfiles, args.bowtie,
+                               bowtie_conf,
+                               args.loglevel == logging.WARNING)
+    for primer_tuple in bowtie_result:
+        if is_bowtie_valid(primer_tuple):
+            print(primer_tuple)
+
+
+def is_bowtie_valid(tuple):
+    pass
 
 
 def setup_bowtie(fasta_file, debug):
@@ -166,6 +183,10 @@ def run_bowtie(bowtie_index, files_prefix, bowtie_exec, bowtie_config, silent):
         res = subprocess.check_output(args).decode('utf-8').split('\n')
 
     logging.info('Bowtie result:\n{}'.format('\n'.join(res)))
+    res_tuple = [
+        (res[i], res[i + 1]) for i in range(0, len(res) - 1, 2)]
+    logging.debug('Result tuple from bowtie: {}'.format(res_tuple))
+    return res_tuple
 
 
 def parse_bowtie_config(cmd, config):
@@ -408,21 +429,27 @@ def parse_arguments():
     )
     parser.add_argument(
         '-c', '--config', type=argparse.FileType("r"),
-        help=
+        default=None, help=
         """
         Configfile with various parameters which are
         passed through to primer3. Has to include a
         'default'-section
-        at top of the file and a 'primer3' with the settings.
+        at top of the file, a 'primer3' section with the settings and a
+        'bowtie' section.
         A default config is distributed with this programm.
         Non-working example:
         [default]
+        SEQUENCE_INCLUDED_BEGIN = 30
         # other settings
 
-        [primer3]
-        PRIMER_OPT_SIZE = 14,
+        [bowtie]
+        MaxInsSize = 100
         # more settings
-        """, required=True)
+
+        [primer3]
+        PRIMER_OPT_SIZE = 14
+        # more settings
+        """)
     parser.add_argument(
         "--bowtie", type=str,
         default="bowtie",
@@ -443,6 +470,7 @@ def parse_fasta(fasta_file, seq_id):
     :param fasta_file: already readable-opened file which contains all the sequences
     """
     seq = ""
+    seq_id_header = ""
     # no sequence-id specified, therefore the first one is taken
     if not seq_id:
         # read one line to remove headerline from internal buffer
@@ -473,7 +501,6 @@ def parse_fasta(fasta_file, seq_id):
                 break
             seq += line
 
-    logging.debug('Successfully extracted sequence')
     return seq, seq_id_header
 
 
