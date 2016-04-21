@@ -9,22 +9,7 @@ from argparse import RawTextHelpFormatter
 
 import primer3
 
-# mapping table for keys used in config-file and actual bowtie settings
-bowtie_options_translation = {
-    'MaxInsSize'.lower(): '-X',
-    'MinInsSize'.lower(): '-I',
-    'MaxMismatch'.lower(): '-v'
-}
-
-# 'lower()' is called since the values, once parsed from the config, are stored
-# in lowercase. But it is nicer to have the same values written in the same way
-
-# checking whether submitted values are valid and explaining messages in case
-# they are not
-bowtie_valid_setting = {
-    'MaxMismatch'.lower(): (
-        lambda x: 0 <= x <= 3, 'Value must hold 0 <= v <= 3')
-}
+MANDATORY_VALUES = {'last_must_match', 'last_to_check', 'last_max_error'}
 
 
 def main():
@@ -61,6 +46,13 @@ def main():
         logging.info('Successfully read config {}'.format(args.config.name))
     else:
         logging.warning('No config file given. Using default values.')
+    if not MANDATORY_VALUES.issubset(set(config['default'])):
+        logging.error('Not all mandatory values found in default-section '
+                      'of the config. Missing: {}'.format(
+            list(map(lambda x: x.upper(),
+                     set(MANDATORY_VALUES.difference(set(config['default'])))))
+        ))
+        sys.exit(1)
     if args.additionalFasta is not None:
         sequences = args.additionalFasta
         logging.info('Found additional file for primer generation {}'.format(
@@ -76,12 +68,17 @@ def main():
         logging.error("Could not find sequence with given ID-Prefix. Aborting")
         sys.exit(1)
     logging.debug('Successfully extracted sequence')
+
+    # length of the insert between the primer pair
+    product_size_range = None
     # are there any settings for primer3?
     if config.has_section('primer3'):
         primer3_conf = config['primer3']
         logging.info('Found settings for primer3')
         logging.debug(
             'primer3-settings: {}'.format(' '.join(primer3_conf.keys())))
+        if 'primer_product_size_range' in primer3_conf.keys():
+            product_size_range = primer3_conf['primer_product_size_range']
     else:
         primer3_conf = None
         logging.warning(
@@ -106,30 +103,22 @@ def main():
         bowtie_index = args.index
         logging.info("Using existing bowtie-index")
 
-    # any settings for bowtie?
-    if config.has_section('bowtie'):
-        bowtie_conf = config['bowtie']
-        logging.info('Found settings for bowtie')
-        logging.debug(
-            'bowtie-settings: {}'.format(' '.join(bowtie_conf.keys())))
-    else:
-        bowtie_conf = None
-        logging.info('Config contains no settings for bowtie')
     bowtie_result = run_bowtie(bowtie_index, args.primerfiles, args.bowtie,
-                               bowtie_conf,
-                               args.loglevel == logging.WARNING)
+                               args.loglevel == logging.WARNING,
+                               product_size_range)
+
     valid_primer_tuple = []
     for primer_tuple in bowtie_result:
-        if is_bowtie_valid(primer_tuple):
+        if is_bowtie_valid(primer_tuple, config['default']):
             logging.debug('Primer tuple valid: {}'.format(primer_tuple))
             valid_primer_tuple.append(primer_tuple)
 
 
-def is_bowtie_valid(tuple):
-    left, right = tuple[0].split(), tuple[1].split()
-
-
-
+def is_bowtie_valid(tuple, error_values):
+    left_match, right_match = tuple[0].split()[11], tuple[1].split()[11]
+    if str in [type(left_match[-1]), type(right_match[-1])]:
+        #
+        return False
 
 
 def setup_bowtie(fasta_file, debug):
@@ -159,7 +148,7 @@ def setup_bowtie(fasta_file, debug):
     return bowtie_index
 
 
-def run_bowtie(bowtie_index, files_prefix, bowtie_exec, bowtie_config, silent):
+def run_bowtie(bowtie_index, files_prefix, bowtie_exec, silent, size_range):
     """
     Calls bowtie to execute the search for matches of the designed primers with
     other sequences.
@@ -175,15 +164,22 @@ def run_bowtie(bowtie_index, files_prefix, bowtie_exec, bowtie_config, silent):
     # base for calling bowtie
     args = [bowtie_exec, "-k", "5000", "-S", "-f", bowtie_index, "-1",
             left, "-2", right, "--sam-nohead"]
+    if size_range is not None:
+        # value is specified, try to parse it as list
+        try:
+            tmp = ast.literal_eval(size_range)
+            if type(tmp) == list and type(tmp[0]) == type(tmp[1]) == int:
+                args += ['--minins', str(tmp[0]), '--maxins', str(tmp[1])]
 
-    # check whether settings for bowtie are available
-    if bowtie_config is not None:
-        args = parse_bowtie_config(args, bowtie_config)
-    else:
-        logging.warning('Config contains no settings for bowtie')
+        except (ValueError, SyntaxError):
+            # Same error has already been reported during primer generation
+            pass
 
+        logging.debug('Product size range was specified for primer3'
+                      '. Applying values for bowtie insert size: {}'.format(
+            size_range
+        ))
     logging.debug('Calling bowtie: {}'.format(args))
-
     if silent:
         res = subprocess.check_output(args, stderr=subprocess.PIPE).decode(
             'utf-8').split('\n')
@@ -196,60 +192,6 @@ def run_bowtie(bowtie_index, files_prefix, bowtie_exec, bowtie_config, silent):
         (res[i], res[i + 1]) for i in range(0, len(res) - 1, 2)]
     logging.debug('Result tuple from bowtie: {}'.format(res_tuple))
     return res_tuple
-
-
-def parse_bowtie_config(cmd, config):
-    def is_int(x):
-        """
-        Checks whether passed value can be parsed as valid int
-        :param x: Value to check
-        :return: True if it can be parsed as int
-        """
-        try:
-            return type(ast.literal_eval(x)) == int
-        except SyntaxError:
-            return False
-
-    # TODO more settings; even custom
-    for key in config.keys():
-        # is the key defined as int?
-        if is_int(config[key]):
-            # are there any special restrictions defined?
-            if key in bowtie_valid_setting.keys():
-                (is_valid, mes) = bowtie_valid_setting[key]
-                # test for special restrictions and show warning if they
-                # do not hold
-                if not is_valid(config.getint(key)):
-                    logging.warning((
-                        'Value for {conf} in config,'
-                        ' resp. {bowtie} in bowtie: {val}'
-                        ' is invalid. {msg}. Ignoring value.'
-                    ).format(
-                        conf=key, msg=mes,
-                        bowtie=bowtie_options_translation[key],
-                        val=config[key])
-                    )
-                    # skip this value since it is invalid
-                    break
-            # try to translate our settings name to a valid
-            # option for bowtie
-            if key in bowtie_options_translation.keys():
-                cmd += [bowtie_options_translation[key],
-                        config[key]]
-            else:
-                # option is not valid and will be ignored
-                logging.warning(
-                    ('Found unknown value in bowtie config: {}. '
-                     'Ignoring value').format(key)
-                )
-        else:
-            logging.warning(
-                ('Found non-int value for {conf} in config,'
-                 ' resp. {bowtie} in bowtie: {val}').format(
-                    conf=key, bowtie=bowtie_options_translation[key],
-                    val=config[key])
-            )
-    return cmd
 
 
 def generate_primer(sequence, primer3_config, primer_file_prefix, config):
@@ -274,7 +216,7 @@ def generate_primer(sequence, primer3_config, primer_file_prefix, config):
                     key=k, v=value, t=type(value)
                 ))
                 primer3_config_dict.update({str(k).upper(): value})
-            except SyntaxError:
+            except (SyntaxError, ValueError):
                 logging.warning(
                     ('Could not parse option {key} with value {v} '
                      'from primer3-config. '
@@ -284,7 +226,14 @@ def generate_primer(sequence, primer3_config, primer_file_prefix, config):
         [str(k) + ": " + str(primer3_config_dict[k]) for k in
          primer3_config_dict.keys()]
     ))  # set primer3-settings
-    primer3.setP3Globals(primer3_config_dict)
+    try:
+        primer3.setP3Globals(primer3_config_dict)
+    except TypeError as message:
+        logging.error(
+            'Settings for primer3 contain following error: {}\nAborting'.format(
+                message
+            ))
+        sys.exit(1)
 
     # remove any newlines or anything else like that
     sequence = sequence.replace('\n', '').replace('\r', '')
@@ -462,7 +411,7 @@ def parse_arguments():
         [primer3]
         PRIMER_OPT_SIZE = 14
         # more settings
-        """)
+        """, required=True)
     parser.add_argument(
         "--bowtie", type=str,
         default="bowtie",
