@@ -88,9 +88,13 @@ def main():
             'Config contains no settings for primer3, '
             'running primer3 with default settings.')
 
+    if args.config is None:
+        general_conf = None
+    else:
+        general_conf = config['default']
     # generate primers, dependent on sequence, primer3-configuration
     # and names of the files containing the found primers
-    generate_primer(sequence, primer3_conf, args.primerfiles, config['default'])
+    generate_primer(sequence, primer3_conf, args.primerfiles, general_conf)
 
     # is an already existing bowtie-index specified?
     if not args.index:
@@ -120,7 +124,9 @@ def main():
 
 
 def is_bowtie_valid(tuple):
-    pass
+    left, right = tuple[0], tuple[1]
+    logging.debug('split: {}'.format(left.split()))
+
 
 
 def setup_bowtie(fasta_file, debug):
@@ -279,9 +285,13 @@ def generate_primer(sequence, primer3_config, primer_file_prefix, config):
 
     # remove any newlines or anything else like that
     sequence = sequence.replace('\n', '').replace('\r', '')
-    # extract region inside sequence to generate primers
-    seq_begin = config.getint('SEQUENCE_INCLUDED_BEGIN', -1)
-    seq_end = config.getint('SEQUENCE_INCLUDED_END', -1)
+    # extract region inside sequence to generate primers if given inside config
+    if config is not None:
+        seq_begin = config.getint('SEQUENCE_INCLUDED_BEGIN', -1)
+        seq_end = config.getint('SEQUENCE_INCLUDED_END', -1)
+    else:
+        seq_begin = 0
+        seq_end = 0
     # is one of the values invalid?
     if seq_begin < 0 or seq_end < 0:
         sys.exit(
@@ -297,7 +307,7 @@ def generate_primer(sequence, primer3_config, primer_file_prefix, config):
     # generate primers for the whole sequence?
     if seq_begin == seq_end == 0:
         logging.info(
-            'Generating primers for the whole sequence as requested')
+            'Generating primers for the whole sequence as requested or by default')
         res = primer3.bindings.designPrimers({
             'SEQUENCE_ID': 'mySequence',
             'SEQUENCE_TEMPLATE': sequence,
