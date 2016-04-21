@@ -250,96 +250,94 @@ def generate_primer(sequence, primer3_config, primer_file_prefix, config):
                      'from primer3-config. '
                      'Ignoring value').format(key=k, v=primer3_config[k])
                 )
-        logging.debug('Final primer3-options-dictionary: {}'.format(
-            [str(k) + ": " + str(primer3_config_dict[k]) for k in
-             primer3_config_dict.keys()]
-        ))
+    logging.debug('Final primer3-options-dictionary: {}'.format(
+        [str(k) + ": " + str(primer3_config_dict[k]) for k in
+         primer3_config_dict.keys()]
+    ))  # set primer3-settings
+    primer3.setP3Globals(primer3_config_dict)
 
-        # set primer3-settings
-        primer3.setP3Globals(primer3_config_dict)
+    # remove any newlines or anything else like that
+    sequence = sequence.replace('\n', '').replace('\r', '')
+    # extract region inside sequence to generate primers
+    seq_begin = config.getint('SEQUENCE_INCLUDED_BEGIN', -1)
+    seq_end = config.getint('SEQUENCE_INCLUDED_END', -1)
+    # is one of the values invalid?
+    if seq_begin < 0 or seq_end < 0:
+        sys.exit(
+            ('ERROR:Found non-negative or invalid values for primer'
+             ' generation concerning the region inside '
+             'the sequence: (SEQUENCE_INCLUDED_BEGIN,SEQUENCE_INCLUDED_END)'
+             ' = {}. If you want to generate primers for the '
+             'whole sequence set both values to 0. Aborting').format(
+                (config['SEQUENCE_INCLUDED_BEGIN'],
+                 config['SEQUENCE_INCLUDED_END']))
+        )
 
-        # remove any newlines or anything else like that
-        sequence = sequence.replace('\n', '').replace('\r', '')
-        # extract region inside sequence to generate primers
-        seq_begin = config.getint('SEQUENCE_INCLUDED_BEGIN', -1)
-        seq_end = config.getint('SEQUENCE_INCLUDED_END', -1)
-        # is one of the values invalid?
-        if seq_begin < 0 or seq_end < 0:
-            sys.exit(
-                ('ERROR:Found non-negative or invalid values for primer'
-                 ' generation concerning the region inside '
-                 'the sequence: (SEQUENCE_INCLUDED_BEGIN,SEQUENCE_INCLUDED_END)'
-                 ' = {}. If you want to generate primers for the '
-                 'whole sequence set both values to 0. Aborting').format(
-                    (config['SEQUENCE_INCLUDED_BEGIN'],
-                     config['SEQUENCE_INCLUDED_END']))
-            )
+    # generate primers for the whole sequence?
+    if seq_begin == seq_end == 0:
+        logging.info(
+            'Generating primers for the whole sequence as requested')
+        res = primer3.bindings.designPrimers({
+            'SEQUENCE_ID': 'mySequence',
+            'SEQUENCE_TEMPLATE': sequence,
+        })
+    else:
+        logging.info(
+            'Generating primers for region {}'.format((seq_begin, seq_end)))
+        res = primer3.bindings.designPrimers({
+            'SEQUENCE_ID': 'mySequence',
+            'SEQUENCE_TEMPLATE': sequence,
+            'SEQUENCE_INCLUDED_REGION': [seq_begin, seq_end]
 
-        # generate primers for the whole sequence?
-        if seq_begin == seq_end == 0:
-            logging.info(
-                'Generating primers for the whole sequence as requested')
-            res = primer3.bindings.designPrimers({
-                'SEQUENCE_ID': 'mySequence',
-                'SEQUENCE_TEMPLATE': sequence,
-            })
-        else:
-            logging.info(
-                'Generating primers for region {}'.format((seq_begin, seq_end)))
-            res = primer3.bindings.designPrimers({
-                'SEQUENCE_ID': 'mySequence',
-                'SEQUENCE_TEMPLATE': sequence,
-                'SEQUENCE_INCLUDED_REGION': [seq_begin, seq_end]
+        })
 
-            })
+    primer_left = {}  # type: dict
+    primer_right = {}  # type: dict
+    for k in res.keys():
+        line = k.split('_')
+        # only applies to keys containing primer-sequences
+        if len(line) >= 4:
+            # only search for RIGHT or LEFT;
+            # MIDDLE would be available as well but we only want the primer
+            if line[1] in ['RIGHT'] and \
+                    line[3] == 'SEQUENCE':
+                primer_right.update({k: res[k]})
+            elif line[1] in ['LEFT'] and \
+                    line[3] == 'SEQUENCE':
+                primer_left.update({k: res[k]})
+    # write the found primer to their corresponding files
+    logging.debug('Opening files to write primers')
+    try:
+        primerfile_left = open(
+            '{prefix}_left.fas'.format(prefix=primer_file_prefix), 'x')
+        primerfile_right = open(
+            '{prefix}_right.fas'.format(prefix=primer_file_prefix), 'x')
+    except FileExistsError:
+        logging.error((
+            'Found existing files with names ({prefix}_left.fas and/or '
+            '{prefix}_right.fas) which should be used for the primerfiles. '
+            'Please remove them and start the programm again').format(
+            prefix=primer_file_prefix))
+        sys.exit('Aborting')
 
-        primer_left = {}  # type: dict
-        primer_right = {}  # type: dict
-        for k in res.keys():
-            line = k.split('_')
-            # only applies to keys containing primer-sequences
-            if len(line) >= 4:
-                # only search for RIGHT or LEFT;
-                # MIDDLE would be available as well but we only want the primer
-                if line[1] in ['RIGHT'] and \
-                        line[3] == 'SEQUENCE':
-                    primer_right.update({k: res[k]})
-                elif line[1] in ['LEFT'] and \
-                        line[3] == 'SEQUENCE':
-                    primer_left.update({k: res[k]})
-        # write the found primer to their corresponding files
-        logging.debug('Opening files to write primers')
-        try:
-            primerfile_left = open(
-                '{prefix}_left.fas'.format(prefix=primer_file_prefix), 'x')
-            primerfile_right = open(
-                '{prefix}_right.fas'.format(prefix=primer_file_prefix), 'x')
-        except FileExistsError:
-            logging.error((
-                'Found existing files with names ({prefix}_left.fas and/or '
-                '{prefix}_right.fas) which should be used for the primerfiles. '
-                'Please remove them and start the programm again').format(
-                prefix=primer_file_prefix))
-            sys.exit('Aborting')
+    # create function for sorting the prefixes
+    def primer_sort(x):
+        return x.split('_')[2] + x.split('_')[1]
 
-        # create function for sorting the prefixes
-        def primer_sort(x):
-            return x.split('_')[2] + x.split('_')[1]
+    logging.debug('Writing left primers to {}'.format(primerfile_left.name))
+    for k in sorted(primer_left.keys(), key=primer_sort):
+        # format in FASTA-style
+        line = ">{}\n{}\n\n".format(k, primer_left[k])
+        primerfile_left.write(line)
+    primerfile_left.close()
 
-        logging.debug('Writing left primers to {}'.format(primerfile_left.name))
-        for k in sorted(primer_left.keys(), key=primer_sort):
-            # format in FASTA-style
-            line = ">{}\n{}\n\n".format(k, primer_left[k])
-            primerfile_left.write(line)
-        primerfile_left.close()
-
-        logging.debug(
-            'Writing right primers to {}'.format(primerfile_right.name))
-        for k in sorted(primer_right.keys(), key=primer_sort):
-            # format in FASTA-style
-            line = ">{}\n{}\n\n".format(k, primer_right[k])
-            primerfile_right.write(line)
-        primerfile_right.close()
+    logging.debug(
+        'Writing right primers to {}'.format(primerfile_right.name))
+    for k in sorted(primer_right.keys(), key=primer_sort):
+        # format in FASTA-style
+        line = ">{}\n{}\n\n".format(k, primer_right[k])
+        primerfile_right.write(line)
+    primerfile_right.close()
 
 
 def parse_arguments():
