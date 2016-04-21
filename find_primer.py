@@ -118,14 +118,17 @@ def main():
     bowtie_result = run_bowtie(bowtie_index, args.primerfiles, args.bowtie,
                                bowtie_conf,
                                args.loglevel == logging.WARNING)
+    valid_primer_tuple = []
     for primer_tuple in bowtie_result:
         if is_bowtie_valid(primer_tuple):
-            print(primer_tuple)
+            logging.debug('Primer tuple valid: {}'.format(primer_tuple))
+            valid_primer_tuple.append(primer_tuple)
 
 
 def is_bowtie_valid(tuple):
-    left, right = tuple[0], tuple[1]
-    logging.debug('split: {}'.format(left.split()))
+    left, right = tuple[0].split(), tuple[1].split()
+
+
 
 
 
