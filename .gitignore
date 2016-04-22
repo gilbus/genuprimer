@@ -75,3 +75,5 @@ target/
 .python-version
 
 tmp/
+*.csv
+findPrimer.conf
