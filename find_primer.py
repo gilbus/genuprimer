@@ -10,6 +10,7 @@ from argparse import RawTextHelpFormatter
 import primer3
 
 MANDATORY_VALUES = {'last_must_match', 'last_to_check', 'last_max_error'}
+RESULT_HEADER = "PAIR_NR,ID,FWD,REV,START,STOP,LENGTH"
 
 
 def main():
@@ -108,12 +109,20 @@ def main():
                                args.loglevel == logging.WARNING,
                                product_size_range)
 
-    results = []
+    results = [RESULT_HEADER]
     for primer_tuple in bowtie_result:
         res = parse_bowtie_result(primer_tuple, config['default'],
                                   primer_pairs_list)
         results.append(res)
-    logging.info('Results:\n{}'.format(results))
+
+    if args.output.name == 'STDOUT':
+        logging.info('No file for output specified, writing to STDOUT.')
+        print('\n'.join(results))
+    else:
+        logging.info('Output file specified, writing results to {}'.format(
+            args.output.name))
+        for line in results:
+            args.output.write('{}\n'.format(line))
 
 
 def parse_bowtie_result(tuple, error_values, primer_pairs_list):
@@ -163,13 +172,13 @@ def parse_bowtie_result(tuple, error_values, primer_pairs_list):
     left, right = left_match.split(':')[2:], right_match.split(':')[2:]
     if is_valid(left) and is_valid(right):
         infos = tuple[0].split('\t')
-        print(infos)
         pair_number = int(infos[0].split('_')[2])
         current_pair = primer_pairs_list[pair_number]
-        separator = '\t'
-        res = 'PRIMER_{num}{sep}{gi}{sep}{left_primer}{sep}{right_primer}'.format(
-            num=pair_number, sep=separator, gi=infos[2], left_primer=current_pair[0],
-            right_primer=current_pair[1]
+        res = ('PRIMER_{num}{sep}{gi}{sep}{left_primer}{sep}{right_primer}'
+               '{sep}{start}{sep}{stop}{sep}{size}').format(
+            num=pair_number, sep=',', gi=infos[2], left_primer=current_pair[0],
+            right_primer=current_pair[1], start=infos[3], stop=infos[7],
+            size=infos[8]
         )
         return res
 
@@ -462,6 +471,14 @@ def parse_arguments():
         PRIMER_OPT_SIZE = 14
         # more settings
         """, required=True)
+    parser.add_argument(
+        '-o', '--output', type=argparse.FileType('w'),
+        default='STDOUT', help=
+        """
+        File where the results should be stored. Default is printing to STDOUT.
+        Results are written as comma separated values (.csv).
+        """
+    )
     parser.add_argument(
         "--bowtie", type=str,
         default="bowtie",
