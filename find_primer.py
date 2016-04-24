@@ -47,28 +47,16 @@ def main():
         logging.info('Successfully read config {}'.format(args.config.name))
     else:
         logging.warning('No config file given. Using default values.')
+    # check whether all mandatory values are present in config
     if not MANDATORY_VALUES.issubset(set(config['default'])):
-        logging.error('Not all mandatory values found in default-section '
-                      'of the config. Missing: {}'.format(
-            list(map(lambda x: x.upper(),
-                     set(MANDATORY_VALUES.difference(set(config['default'])))))
-        ))
+        logging.error(
+            'Not all mandatory values found in default-section '
+            'of the config. Missing: {}'.format(
+                list(map(lambda x: x.upper(),
+                         set(MANDATORY_VALUES.difference(
+                             set(config['default'])))))
+            ))
         sys.exit(1)
-    if args.additionalFasta is not None:
-        sequences = args.additionalFasta
-        logging.info('Found additional file for primer generation {}'.format(
-            sequences.name
-        ))
-    else:
-        sequences = args.FastaFile
-        logging.info(
-            'No additional file with sequences for primer-generation specified')
-    # extract sequence from sequences
-    sequence, seq_id = parse_fasta(sequences, args.sequence)
-    if not sequence:
-        logging.error("Could not find sequence with given ID-Prefix. Aborting")
-        sys.exit(1)
-    logging.debug('Successfully extracted sequence')
 
     # length of the insert between the primer pair
     product_size_range = None
@@ -86,15 +74,39 @@ def main():
             'Config contains no settings for primer3, '
             'running primer3 with default settings.')
 
-    if args.config is None:
-        general_conf = None
-    else:
-        general_conf = config['default']
-    # generate primers, dependent on sequence, primer3-configuration
-    # and names of the files containing the found primers
-    primer_pairs_list = generate_primer(sequence, primer3_conf,
-                                        args.primerfiles, general_conf)
+    # user wants to generate new primer?
+    if not args.keep_primer:
+        logging.info('Generating new primer.')
+        if args.additionalFasta is not None:
+            sequences = args.additionalFasta
+            logging.info(
+                'Found additional file for primer generation {}'.format(
+                    sequences.name
+                ))
+        else:
+            sequences = args.FastaFile
+            logging.info(
+                'No additional file with sequences for primer-generation specified')
+        # extract sequence from sequences
+        sequence, seq_id = parse_fasta(sequences, args.sequence)
+        if not sequence:
+            logging.error(
+                "Could not find sequence with given ID-Prefix. Aborting")
+            sys.exit(1)
+        logging.debug('Successfully extracted sequence')
 
+        if args.config is None:
+            general_conf = None
+        else:
+            general_conf = config['default']
+        # generate primers, dependent on sequence, primer3-configuration
+        # and names of the files containing the found primers
+        primer_pairs_list = generate_primer(sequence, primer3_conf,
+                                            args.primerfiles, general_conf)
+    else:
+        logging.info('Trying to parse existing primer from files specified'
+                     ' via -p/--primerfiles')
+        primer_pairs_list = parse_existing_primer(args.primerfiles)
     # is an already existing bowtie-index specified?
     if not args.index:
         # no index available, so we have to create our own one
@@ -119,7 +131,7 @@ def main():
         else:
             continue
 
-    if args.output.name == 'STDOUT':
+    if args.output is None:
         logging.info('No file for output specified, writing to STDOUT.')
         print('\n'.join(results))
     else:
@@ -127,6 +139,51 @@ def main():
             args.output.name))
         for line in results:
             args.output.write('{}\n'.format(line))
+
+
+def parse_existing_primer(prefix):
+    left_name = "{}_left.fas".format(prefix)
+    right_name = "{}_right.fas".format(prefix)
+    try:
+        left_primer = open(left_name, 'r')
+        right_primer = open(right_name, 'r')
+    except FileNotFoundError:
+        logging.error('Could not find or read one or both of the files'
+                      'containing the primers that should be used for this run'
+                      'instead of generating new one.'
+                      'Looking for files: {} and {}. Aborting'.format(
+            left_name, right_name
+        ))
+        sys.exit(1)
+    primer_left_list = []
+    primer_right_list = []
+    for line in left_primer:
+        if line[0] == '>':
+            primer_left_list.append(extract_fasta_seq(left_primer))
+
+    logging.debug('Extracted following primer from {}: {}'.format(
+        left_name, ' ,'.join(primer_left_list)
+    ))
+
+    for line in right_primer:
+        if line[0] == '>':
+            primer_right_list.append(extract_fasta_seq(right_primer))
+
+    logging.debug('Extracted following primer from {}: {}'.format(
+        right_name, ' ,'.join(primer_right_list)
+    ))
+    return list(zip(primer_left_list, primer_right_list))
+
+
+def extract_fasta_seq(fasta_file):
+    seq = ""
+    for line in fasta_file:
+        # read as long as no newline appears
+        if line in ['\n', '\r\n'] or line[0] == '>':
+            break
+        seq += line
+    return seq.replace('\n', '').replace('\r', '')
+
 
 
 def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list):
@@ -380,10 +437,12 @@ def generate_primer(sequence, primer3_config, primer_file_prefix, config):
     def primer_sort(x):
         return x.split('_')[2] + x.split('_')[1]
 
-    primer_pairs_list = []
+    # creating empty list for primer sorted by id
+    primer_left_list = []
+    primer_right_list = []
     logging.debug('Writing left primers to {}'.format(primerfile_left.name))
     for k in sorted(primer_left.keys(), key=primer_sort):
-        primer_pairs_list.append((primer_left[k],))
+        primer_left_list.append(primer_left[k])
         # format in FASTA-style
         line = ">{}\n{}\n\n".format(k, primer_left[k])
         primerfile_left.write(line)
@@ -391,14 +450,14 @@ def generate_primer(sequence, primer3_config, primer_file_prefix, config):
 
     logging.debug(
         'Writing right primers to {}'.format(primerfile_right.name))
-    for n, k in enumerate(sorted(primer_right.keys(), key=primer_sort)):
-        primer_pairs_list[n] = (primer_pairs_list[n][0], primer_right[k])
+    for k in sorted(primer_right.keys(), key=primer_sort):
+        primer_right_list.append(primer_right[k])
         # format in FASTA-style
         line = ">{}\n{}\n\n".format(k, primer_right[k])
         primerfile_right.write(line)
     primerfile_right.close()
 
-    return primer_pairs_list
+    return list(zip(primer_left_list, primer_right_list))
 
 
 def parse_arguments():
@@ -446,7 +505,8 @@ def parse_arguments():
         "-p", "--primerfiles", type=str, default="primer3", help=
         """
         Prefix for the files where the primer will be stored. The suffixes will be 'left' and 'right'.
-        Therefore the default remains, their names will 'primer_left.fas' and 'primer_right.fas'
+        Therefore if the default remains, their names will be
+        'primer3_left.fas' and 'primer3_right.fas'
         """
     )
     parser.add_argument(
@@ -492,7 +552,7 @@ def parse_arguments():
         """, required=True)
     parser.add_argument(
         '-o', '--output', type=argparse.FileType('w'),
-        default='STDOUT', help=
+        default=None, help=
         """
         File where the results should be stored. Default is printing to STDOUT.
         Results are written as comma separated values (.csv).
@@ -506,6 +566,15 @@ def parse_arguments():
         The bowtie-executable if not in PATH.
         """
     )
+    parser.add_argument(
+        "--keep-primer", dest='keep_primer', action='store_true',
+        help=
+        """
+        Set this option to start another run with the same primers from last run
+        or some custom one.
+        """
+    )
+    parser.set_defaults(keep_primer=False)
     return parser.parse_args()
 
 
@@ -526,11 +595,7 @@ def parse_fasta(fasta_file, seq_id):
         logging.info(
             'No seq_id passed, taking first sequence from {} with id {}'.format(
                 fasta_file.name, seq_id_header))
-        for line in fasta_file:
-            # read as long as no newline appears
-            if line in ['\n', '\r\n']:
-                break
-            seq += line
+        seq = extract_fasta_seq(fasta_file)
     # a sequence-id has been passed to the programm
     else:
         logging.info('Partial sequence-id given: {}'.format(seq_id))
@@ -543,11 +608,7 @@ def parse_fasta(fasta_file, seq_id):
                     'using sequence with id {}'.format(
                         seq_id_header))
                 break
-        for line in fasta_file:
-            # again, read as long as no newline appears
-            if line in ['\n', '\r\n']:
-                break
-            seq += line
+        seq = extract_fasta_seq(fasta_file)
 
     return seq, seq_id_header
 
