@@ -3,6 +3,7 @@ import ast
 import configparser
 import logging
 import os
+import re
 import subprocess
 import sys
 from argparse import RawTextHelpFormatter
@@ -126,7 +127,6 @@ def main():
         res = parse_bowtie_result(primer_tuple, config['default'],
                                   primer_pairs_list)
         if res is not None:
-            logging.debug('Tuple has considerable match')
             results.append(res)
         else:
             continue
@@ -185,7 +185,6 @@ def extract_fasta_seq(fasta_file):
     return seq.replace('\n', '').replace('\r', '')
 
 
-
 def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list):
     """
     Parses the bowtie result and presents them in a csv-style containing
@@ -212,42 +211,71 @@ def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list):
         sys.exit(1)
 
     def is_valid(values):
-        logging.debug('checking: {}'.format(values))
-        logging.debug(int(values[-1]) < last_must_match)
         # if last entry is a number it represents the number of matches at
         # the end of the primer; must not be lower than given value
-        if values[-1].isdigit() and int(values[-1]) < last_must_match:
-            logging.debug(
-                'Failed because last_must_match not fulfilled: {}'.format(
-                    values))
-            return False
+        if values[-1].isdigit():
+            if int(values[-1]) < last_must_match:
+                logging.info(
+                    'Failed because last_must_match not fulfilled: {}'.format(
+                        values))
+                return False
+            # only one number at the end and it is greate than last_must_match
+            if len(values) == 1:
+                return True
         # if last entry is a char there is no match, unless we do not care about
         # the entries at the end
         elif values[-1].isalpha() and last_must_match != 0:
-            logging.debug('Failed because last char is str: {}'.format(values))
+            logging.info(
+                'Failed because last char is str, '
+                'therefore last n bases cannot match: {}'.format(values))
             return False
 
+        logging.debug('Checking non-trivial: {}'.format(values))
         # calculate the last entries to check
+        # index to iterate over result values
         i = 1
+        # counted number of substitutions/mismatches
         number_of_subs = 0
-        while i <= last_to_check:
+        # how many bases, when expanding numeral values are already processed
+        bases_processed = 0
+        # can we stop checking?
+        while bases_processed <= last_to_check:
             current = values[-i]
             if current.isdigit():
-                i += int(current)
+                bases_processed += int(current)
             else:
                 number_of_subs += 1
+                bases_processed += 1
             i += 1
-        logging.debug(
-            'Counted {} errors in {}'.format(number_of_subs, values))
+        if number_of_subs < last_max_error:
+            return True
+        else:
+            logging.info('Failed because of {num} subs in last {last} '
+                         'bases, {max} allowed'.format(
+                num=number_of_subs, last=last_to_check, max=last_max_error
+            ))
         return number_of_subs < last_max_error
 
+    # get string representation of mismatch bases
     left_match, right_match = primer_tuple[0].split()[12], \
                               primer_tuple[1].split()[12]
-    left, right = left_match.split(':')[2:], right_match.split(':')[2:]
-    if is_valid(left) and is_valid(right):
+    # split numerical and alphabetic values
+    left_res = re.split('(\d+)', left_match.split(':')[2])
+    right_res = re.split('(\d+)', right_match.split(':')[2])
+
+    def remove_empty_mismatch(x):
+        return x not in ['', '0', 0]
+
+    # check whether the hit reported bowtie is significant according to users
+    # preferences
+
+    if is_valid(list(filter(remove_empty_mismatch, left_res))) and \
+        is_valid(list(filter(remove_empty_mismatch, right_res))):
         infos = primer_tuple[0].split('\t')
         pair_number = int(infos[0].split('_')[2])
         current_pair = primer_pairs_list[pair_number]
+
+        # format results to result format
         res = ('PRIMER_{num}{sep}{gi}{sep}{left_primer}{sep}{right_primer}'
                '{sep}{start}{sep}{stop}{sep}{size}').format(
             num=pair_number, sep=',', gi=infos[2], left_primer=current_pair[0],
