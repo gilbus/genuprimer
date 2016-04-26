@@ -431,12 +431,13 @@ def generate_primer(sequence, primer3_config, primer_file_prefix, config):
             'SEQUENCE_TEMPLATE': sequence,
         })
     else:
-        sequence = sequence[seq_begin-1: seq_end-1]
         logging.info(
             'Generating primers for region {}'.format((seq_begin, seq_end)))
         res = primer3.bindings.designPrimers({
             'SEQUENCE_ID': 'mySequence',
             'SEQUENCE_TEMPLATE': sequence,
+            # give start of sequence and length
+            'SEQUENCE_INCLUDED_REGION': [seq_begin, seq_end - seq_begin]
 
         })
 
