@@ -126,7 +126,8 @@ def main():
                                args.loglevel == logging.WARNING,
                                product_size_range, args.bowtie_output)
 
-    results = [RESULT_HEADER]
+    # create empty list for results
+    results = []
     for primer_tuple in bowtie_result:
         res = parse_bowtie_result(primer_tuple, config['default'],
                                   primer_pairs_list, seq_included_region)
@@ -134,6 +135,12 @@ def main():
             results.append(res)
         else:
             continue
+
+    # sort results by primer pair number
+    results = list(
+        sorted(results, key=lambda x: int(x.split(',')[0].split('_')[-1])))
+    # add header at the beginning
+    results.insert(0, RESULT_HEADER)
 
     if args.output is None:
         logging.info('No file for output specified, writing to STDOUT.')
