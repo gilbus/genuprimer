@@ -112,7 +112,7 @@ def main():
     if not args.index:
         # no index available, so we have to create our own one
         bowtie_index = setup_bowtie(args.FastaFile,
-                                    args.loglevel == logging.DEBUG)
+                                    args.loglevel == logging.DEBUG, args.bowtie)
         logging.info("No existing index for bowtie specified")
     else:
         bowtie_index = args.index
@@ -120,7 +120,7 @@ def main():
 
     bowtie_result = run_bowtie(bowtie_index, args.primerfiles, args.bowtie,
                                args.loglevel == logging.WARNING,
-                               product_size_range)
+                               product_size_range, args.bowtie_output)
 
     results = [RESULT_HEADER]
     for primer_tuple in bowtie_result:
@@ -215,7 +215,7 @@ def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list):
         # the end of the primer; must not be lower than given value
         if values[-1].isdigit():
             if int(values[-1]) < last_must_match:
-                logging.info(
+                logging.debug(
                     'Failed because last_must_match not fulfilled: {}'.format(
                         values))
                 return False
@@ -225,7 +225,7 @@ def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list):
         # if last entry is a char there is no match, unless we do not care about
         # the entries at the end
         elif values[-1].isalpha() and last_must_match != 0:
-            logging.info(
+            logging.debug(
                 'Failed because last char is str, '
                 'therefore last n bases cannot match: {}'.format(values))
             return False
@@ -250,8 +250,8 @@ def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list):
         if number_of_subs < last_max_error:
             return True
         else:
-            logging.info('Failed because of {num} subs in last {last} '
-                         'bases, {max} allowed'.format(
+            logging.debug('Failed because of {num} subs in last {last} '
+                          'bases, {max} allowed'.format(
                 num=number_of_subs, last=last_to_check, max=last_max_error
             ))
         return number_of_subs < last_max_error
@@ -287,7 +287,7 @@ def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list):
         return None
 
 
-def setup_bowtie(fasta_file, debug):
+def setup_bowtie(fasta_file, debug, bowtie_exec):
     """
     If no bowtie-index is specified we have to build it
     :type fasta_file: argparse.FileType
@@ -303,7 +303,8 @@ def setup_bowtie(fasta_file, debug):
         index_dir=bowtie_index_dir,
         prefix=
         re.split("/|\.", fasta_file.name)[-2])
-    args = ["bowtie-build", fasta_file.name, bowtie_index]
+    bowtie_build = bowtie_exec + '-build'
+    args = [bowtie_build, fasta_file.name, bowtie_index]
     logging.info('bowtie-build command: {}'.format(args))
     if not debug:
         # We are not in debug-mode so no output will be shown
@@ -314,7 +315,8 @@ def setup_bowtie(fasta_file, debug):
     return bowtie_index
 
 
-def run_bowtie(bowtie_index, files_prefix, bowtie_exec, silent, size_range):
+def run_bowtie(bowtie_index, files_prefix, bowtie_exec, silent, size_range,
+               bowtie_output):
     """
     Calls bowtie to execute the search for matches of the designed primers with
     other sequences.
@@ -353,10 +355,12 @@ def run_bowtie(bowtie_index, files_prefix, bowtie_exec, silent, size_range):
         logging.info('Bowtie result summary:')
         res = subprocess.check_output(args).decode('utf-8').split('\n')
 
-    logging.info('Bowtie result:\n{}'.format('\n'.join(res)))
+    if bowtie_output:
+        logging.info('Printing bowtie result to STDERR as requested')
+        print('\n'.join(res), file=sys.stderr)
+        sys.stderr.flush()
     res_tuple = [
         (res[i], res[i + 1]) for i in range(0, len(res) - 1, 2)]
-    logging.debug('Result tuple from bowtie: {}'.format(res_tuple))
     return res_tuple
 
 
@@ -592,7 +596,16 @@ def parse_arguments():
         default="bowtie",
         help=
         """
-        The bowtie-executable if not in PATH.
+        The bowtie executable if not in PATH. If needed bowtie-build is expected
+        to be found via appending '-build' to bowtie.
+        """
+    )
+    parser.add_argument(
+        "--show-bowtie", dest='bowtie_output', action='store_true',
+        help=
+        """
+        Set this option to show the original results of bowtie, written to
+        STDERR.
         """
     )
     parser.add_argument(
@@ -603,7 +616,7 @@ def parse_arguments():
         or some custom one.
         """
     )
-    parser.set_defaults(keep_primer=False)
+    parser.set_defaults(keep_primer=False, bowtie_output=False)
     return parser.parse_args()
 
 
