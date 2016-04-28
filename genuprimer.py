@@ -308,6 +308,7 @@ def parse_bowtie_result(primer_tuple, error_values, primer_dict,
     [left_split, right_split] = list(map(str.split, primer_tuple))
     # get string representation of mismatch bases
     left_match, right_match = left_split[12], right_split[12]
+    # get id of each primer pair
     left_name, right_name = left_split[0], right_split[0]
     # split numerical and alphabetic values
     left_res = re.split('(\d+)', left_match.split(':')[2])
