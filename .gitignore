@@ -76,5 +76,5 @@ target/
 
 tmp/
 *.csv
-findPrimer.conf
+*.conf
 araport/
