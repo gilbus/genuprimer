@@ -13,4 +13,9 @@ This program has been developed for `Python3.4` but it may also work with newer 
 
 ## Options
 
+A shortened and more compact version of available options and their meanings can also be found via `./genuprimer --help`.
 
+Usage: 
+
+`genuprimer.py [-h] [-s SEQUENCE] [-a ADDITIONALFASTA] [-p PRIMERFILES] [-i INDEX] [-d] [-v] -c CONFIG [-o OUTPUT]
+                    [--bowtie BOWTIE] [--show-bowtie] [--keep-primer] FastaFile`
