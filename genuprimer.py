@@ -12,7 +12,7 @@ from argparse import RawTextHelpFormatter
 import primer3
 
 MANDATORY_VALUES = {'last_must_match', 'last_to_check', 'last_max_error'}
-RESULT_HEADER = "PAIR_NR,ID,FWD,REV,START,STOP,LENGTH,EXP"
+RESULT_HEADER = "FWD_ID,REV_ID,MATCH_ID,FWD,REV,START,STOP,LENGTH,EXP"
 
 
 def main():
@@ -25,7 +25,7 @@ def main():
     # setup logging and level as well as colors for logging
     # colors are only working on linux
     logging.addLevelName(logging.WARNING,
-                         # format red
+                         # format yellow
                          "\033[1;33m%s\033[1;0m" % logging.getLevelName(
                              logging.WARNING))
     logging.addLevelName(logging.ERROR,
@@ -33,12 +33,12 @@ def main():
                          "\033[1;31m%s\033[1;0m" % logging.getLevelName(
                              logging.ERROR))
     logging.addLevelName(logging.INFO,
-                         # format blue
-                         "\033[1;34m%s\033[1;0m" % logging.getLevelName(
-                             logging.INFO))
-    logging.addLevelName(logging.DEBUG,
                          # format green
                          "\033[1;32m%s\033[1;0m" % logging.getLevelName(
+                             logging.INFO))
+    logging.addLevelName(logging.DEBUG,
+                         # format blue
+                         "\033[1;34m%s\033[1;0m" % logging.getLevelName(
                              logging.DEBUG))
     logging.basicConfig(format='%(levelname)s:%(message)s', level=args.loglevel)
     logging.debug('Received arguments: {}'.format(args))
@@ -111,7 +111,7 @@ def main():
             general_conf = config['default']
         # generate primers, dependent on sequence, primer3-configuration
         # and names of the files containing the found primers
-        primer_pairs_list, seq_included_region = generate_primer(
+        primer_dict, seq_included_region = generate_primer(
             sequence, primer3_conf, args.primerfiles, general_conf)
     else:
         logging.info('Trying to parse existing primer from files specified'
@@ -122,7 +122,7 @@ def main():
         if args.sequence is not None:
             logging.warning('Specified value for -s/--sequence will not be '
                             'considered since no primer will be generated.')
-        primer_pairs_list = parse_existing_primer(args.primerfiles)
+        primer_dict = parse_existing_primer(args.primerfiles)
         # we did not generate any primer, therefore we do not have any sequence
         # id to check whether a match is expected or not
         seq_id = None
@@ -144,7 +144,7 @@ def main():
     results = []
     for primer_tuple in bowtie_result:
         res = parse_bowtie_result(primer_tuple, config['default'],
-                                  primer_pairs_list, seq_included_region,
+                                  primer_dict, seq_included_region,
                                   args.additionalFasta is not None,
                                   seq_id)
         if res is not None:
@@ -153,8 +153,8 @@ def main():
             continue
 
     # sort results by primer pair number
-    results = list(
-        sorted(results, key=lambda x: int(x.split(',')[0].split('_')[-1])))
+    # results = list(
+    #     sorted(results, key=lambda x: int(x.split(',')[0].split('_')[-1])))
     # add header at the beginning
     results.insert(0, RESULT_HEADER)
 
@@ -175,31 +175,42 @@ def parse_existing_primer(prefix):
         left_primer = open(left_name, 'r')
         right_primer = open(right_name, 'r')
     except FileNotFoundError:
-        logging.error('Could not find or read one or both of the files'
-                      'containing the primers that should be used for this run'
-                      'instead of generating new one.'
-                      'Looking for files: {} and {}. Aborting'.format(
-            left_name, right_name
-        ))
+        logging.error(
+            'Could not find or read one or both of the files'
+            'containing the primers that should be used for this run'
+            'instead of generating new one.'
+            'Looking for files: {} and {}. Aborting'.format(
+                left_name, right_name
+            ))
         sys.exit(1)
     primer_left_list = []
     primer_right_list = []
     for line in left_primer:
         if line[0] == '>':
-            primer_left_list.append(extract_fasta_seq(left_primer))
+            # extract id from header
+            seq_id = line.split('>')[1].split()[0]
+            sequence = extract_fasta_seq(left_primer)
+            primer_left_list.append((seq_id, sequence))
 
     logging.debug('Extracted following primer from {}: {}'.format(
-        left_name, ' ,'.join(primer_left_list)
+        left_name, ' ,'.join(map(str, primer_left_list))
     ))
 
     for line in right_primer:
         if line[0] == '>':
-            primer_right_list.append(extract_fasta_seq(right_primer))
+            # extract id from header
+            seq_id = line.split('>')[1].split()[0]
+            sequence = extract_fasta_seq(right_primer)
+            primer_right_list.append((seq_id, sequence))
 
     logging.debug('Extracted following primer from {}: {}'.format(
-        right_name, ' ,'.join(primer_right_list)
+        right_name, ' ,'.join(map(str, primer_right_list))
     ))
-    return list(zip(primer_left_list, primer_right_list))
+    primer_dict = {}  # type: dict
+    for (l_id, l_seq), (r_id, r_seq) in zip(primer_left_list,
+                                            primer_right_list):
+        primer_dict.update({(l_id, r_id): (l_seq, r_seq)})
+    return primer_dict
 
 
 def extract_fasta_seq(fasta_file):
@@ -212,7 +223,7 @@ def extract_fasta_seq(fasta_file):
     return seq.replace('\n', '').replace('\r', '')
 
 
-def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list,
+def parse_bowtie_result(primer_tuple, error_values, primer_dict,
                         seq_included_region, additional_fasta, seq_id):
     """
     Parses the bowtie result and presents them in a csv-style containing
@@ -293,9 +304,11 @@ def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list,
         # if bowtie result line is so short it means no hit has been found
         # and obviously a non existent match cannot be significant
         return None
+    # split bowtie results for forward and reverse primer of one pair
+    [left_split, right_split] = list(map(str.split, primer_tuple))
     # get string representation of mismatch bases
-    left_match, right_match = primer_tuple[0].split()[12], \
-                              primer_tuple[1].split()[12]
+    left_match, right_match = left_split[12], right_split[12]
+    left_name, right_name = left_split[0], right_split[0]
     # split numerical and alphabetic values
     left_res = re.split('(\d+)', left_match.split(':')[2])
     right_res = re.split('(\d+)', right_match.split(':')[2])
@@ -311,14 +324,14 @@ def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list,
         """
         return x not in ['', '0', 0]
 
+    # sanitize string representations from empty values
+    left_res = list(filter(remove_empty_mismatch, left_res))
+    right_res = list(filter(remove_empty_mismatch, right_res))
     # check whether the hit reported bowtie is significant according to users
     # preferences
-
-    if is_significant(list(filter(remove_empty_mismatch, left_res))) and \
-        is_significant(list(filter(remove_empty_mismatch, right_res))):
-        infos = primer_tuple[0].split('\t')
-        pair_number = int(infos[0].split('_')[2])
-        current_pair = primer_pairs_list[pair_number]
+    if is_significant(left_res) and is_significant(right_res):
+        infos = left_split
+        current_pair = primer_dict.get(tuple(sorted((left_name, right_name))))
 
         if additional_fasta or seq_id is None:
             # if primer have been generated using an additional file we cannot
@@ -334,9 +347,10 @@ def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list,
                 infos[7]) <= seq_included_region[1] and infos[2] == seq_id
 
         # format results to result format
-        res = ('PRIMER_{num}{sep}{gi}{sep}{left_primer}{sep}{right_primer}'
+        res = ('{fwd}{sep}{rev}{sep}{gi}{sep}{left_primer}{sep}{right_primer}'
                '{sep}{start}{sep}{stop}{sep}{size}{sep}{exp}').format(
-            num=pair_number, sep=',', gi=infos[2], left_primer=current_pair[0],
+            fwd=left_name, rev=right_name, sep=',', gi=infos[2],
+            left_primer=current_pair[0],
             right_primer=current_pair[1], start=infos[3], stop=infos[7],
             size=infos[8], exp=1 if expected_hit else 0
         )
@@ -431,7 +445,8 @@ def generate_primer(sequence, primer3_config, primer_file_prefix, config):
     be stored.
     :param sequence: Sequence template for the primers
     :param primer3_config: containing the settings for primer3
-    :return: The separated primer-pairs and the tuple with specified
+    :return: A dictionary containing all primer pairs and their names
+    and the tuple with specified
     SEQUENCE_INCLUDED_REGION since this values are also parsed in this function
     """
     primer3_config_dict = {}  # type: dict
@@ -526,31 +541,35 @@ def generate_primer(sequence, primer3_config, primer_file_prefix, config):
     primerfile_right = open(
         '{prefix}_right.fas'.format(prefix=primer_file_prefix), 'w')
 
-    # create function for sorting the prefixes
-    def primer_sort(x):
-        return x.split('_')[2] + x.split('_')[1]
+    def extract_number(x):
+        """
+        Extracts the number of the name of a generated primer
+        :param x: primer-id
+        :return: included number
+        """
+        return int(x.split('_')[2])
 
-    # creating empty list for primer sorted by id
-    primer_left_list = []
-    primer_right_list = []
-    logging.debug('Writing left primers to {}'.format(primerfile_left.name))
-    for k in sorted(primer_left.keys(), key=primer_sort):
-        primer_left_list.append(primer_left[k])
-        # format in FASTA-style
-        line = ">{}\n{}\n\n".format(k, primer_left[k])
-        primerfile_left.write(line)
-    primerfile_left.close()
+    primer_dict = {}
 
     logging.debug(
-        'Writing right primers to {}'.format(primerfile_right.name))
-    for k in sorted(primer_right.keys(), key=primer_sort):
-        primer_right_list.append(primer_right[k])
+        'Writing primers to files: {}, {}'.format(primerfile_left.name,
+                                                  primerfile_right.name))
+    for left_key, right_key in zip(
+        sorted(primer_left.keys(), key=extract_number),
+        sorted(primer_right.keys(), key=extract_number)
+    ):
         # format in FASTA-style
-        line = ">{}\n{}\n\n".format(k, primer_right[k])
-        primerfile_right.write(line)
+        left_line = ">{}\n{}\n\n".format(left_key, primer_left[left_key])
+        right_line = ">{}\n{}\n\n".format(right_key, primer_right[right_key])
+        primerfile_left.write(left_line)
+        primerfile_right.write(right_line)
+        primer_dict.update({(left_key, right_key): (
+            primer_left[left_key], primer_right[right_key])})
+
+    primerfile_left.close()
     primerfile_right.close()
 
-    return list(zip(primer_left_list, primer_right_list)), (seq_begin, seq_end)
+    return primer_dict, (seq_begin, seq_end)
 
 
 def parse_arguments():
