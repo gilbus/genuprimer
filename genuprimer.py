@@ -26,7 +26,7 @@ def main():
     # colors are only working on linux
     logging.addLevelName(logging.WARNING,
                          # format red
-                         "\033[1;31m%s\033[1;0m" % logging.getLevelName(
+                         "\033[1;33m%s\033[1;0m" % logging.getLevelName(
                              logging.WARNING))
     logging.addLevelName(logging.ERROR,
                          # format red
@@ -89,6 +89,10 @@ def main():
                 'Found additional file for primer generation {}'.format(
                     sequences.name
                 ))
+            logging.warning(
+                'It is not possible to say whether a match found '
+                'by bowtie is expected or not if an additional file for '
+                'primer generation is passed.')
         else:
             sequences = args.FastaFile
             logging.info(
@@ -112,7 +116,16 @@ def main():
     else:
         logging.info('Trying to parse existing primer from files specified'
                      ' via -p/--primerfiles')
+        logging.warning('It is not possible to say whether a match found '
+                        'by bowtie is expected or not if no primer have been '
+                        'generated in this run.')
+        if args.sequence is not None:
+            logging.warning('Specified value for -s/--sequence will not be '
+                            'considered since no primer will be generated.')
         primer_pairs_list = parse_existing_primer(args.primerfiles)
+        # we did not generate any primer, therefore we do not have any sequence
+        # id to check whether a match is expected or not
+        seq_id = None
     # is an already existing bowtie-index specified?
     if not args.index:
         # no index available, so we have to create our own one
@@ -131,7 +144,9 @@ def main():
     results = []
     for primer_tuple in bowtie_result:
         res = parse_bowtie_result(primer_tuple, config['default'],
-                                  primer_pairs_list, seq_included_region)
+                                  primer_pairs_list, seq_included_region,
+                                  args.additionalFasta is not None,
+                                  seq_id)
         if res is not None:
             results.append(res)
         else:
@@ -198,7 +213,7 @@ def extract_fasta_seq(fasta_file):
 
 
 def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list,
-                        seq_included_region):
+                        seq_included_region, additional_fasta, seq_id):
     """
     Parses the bowtie result and presents them in a csv-style containing
     the most important information.
@@ -226,7 +241,7 @@ def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list,
             ))
         sys.exit(1)
 
-    def is_valid(values):
+    def is_significant(values):
         # if last entry is a number it represents the number of matches at
         # the end of the primer; must not be lower than given value
         if values[-1].isdigit():
@@ -272,6 +287,12 @@ def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list,
             ))
         return number_of_subs < last_max_error
 
+    # if bowtie result line is so short it means no hit has been found
+    # and obviously a non existent match cannot be significant
+    if len(primer_tuple[0].split()) <= 12 or len(primer_tuple[1].split()) <= 12:
+        # if bowtie result line is so short it means no hit has been found
+        # and obviously a non existent match cannot be significant
+        return None
     # get string representation of mismatch bases
     left_match, right_match = primer_tuple[0].split()[12], \
                               primer_tuple[1].split()[12]
@@ -280,21 +301,39 @@ def parse_bowtie_result(primer_tuple, error_values, primer_pairs_list,
     right_res = re.split('(\d+)', right_match.split(':')[2])
 
     def remove_empty_mismatch(x):
+        """
+        Used to remove any non important information from the string match
+        representation of bowtie. Empty ones are not informative and the usage
+        of 0 does not make any sense me since it means: 0 consecutive bases
+        matched.
+        :param x: A digit or char from the match string representation
+        :return: Boolean value whether it should be removed or not
+        """
         return x not in ['', '0', 0]
 
     # check whether the hit reported bowtie is significant according to users
     # preferences
 
-    if is_valid(list(filter(remove_empty_mismatch, left_res))) and \
-        is_valid(list(filter(remove_empty_mismatch, right_res))):
+    if is_significant(list(filter(remove_empty_mismatch, left_res))) and \
+        is_significant(list(filter(remove_empty_mismatch, right_res))):
         infos = primer_tuple[0].split('\t')
         pair_number = int(infos[0].split('_')[2])
         current_pair = primer_pairs_list[pair_number]
 
-        # format results to result format
-        expected_hit = seq_included_region[0] <= int(infos[3]) <= int(
-            infos[7]) <= seq_included_region[1]
+        if additional_fasta or seq_id is None:
+            # if primer have been generated using an additional file we cannot
+            # compare positional information with the fasta file used in bowtie
+            # therefore every hit will be not expected
+            expected_hit = False
+        else:
+            # a match is expected if its start and end position are inside
+            # SEQUENCE_INCLUDED_REGION used for primer generation and if
+            # the id of the sequence where the match was found is the
+            # same as the one for which the primer were generated
+            expected_hit = seq_included_region[0] <= int(infos[3]) <= int(
+                infos[7]) <= seq_included_region[1] and infos[2] == seq_id
 
+        # format results to result format
         res = ('PRIMER_{num}{sep}{gi}{sep}{left_primer}{sep}{right_primer}'
                '{sep}{start}{sep}{stop}{sep}{size}{sep}{exp}').format(
             num=pair_number, sep=',', gi=infos[2], left_primer=current_pair[0],
@@ -368,14 +407,15 @@ def run_bowtie(bowtie_index, files_prefix, bowtie_exec, silent, size_range,
         ))
     logging.info('Calling bowtie: {}'.format(args))
     if silent:
-        res = subprocess.check_output(args, stderr=subprocess.PIPE).decode(
-            'utf-8').split('\n')
+        args += ['--quiet']
+        res = subprocess.check_output(args).decode('utf-8').split('\n')
     else:
         logging.info('Bowtie result summary:')
         res = subprocess.check_output(args).decode('utf-8').split('\n')
 
     if bowtie_output:
-        logging.info('Printing bowtie result to STDERR as requested')
+        logging.info('Printing bowtie result to STDERR as requested by '
+                     '--show-bowtie')
         print('\n'.join(res), file=sys.stderr)
         sys.stderr.flush()
     res_tuple = [
