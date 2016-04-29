@@ -499,7 +499,7 @@ def parse_bowtie_result(primer_tuple: tuple,
                '{sep}{start}{sep}{stop}{sep}{size}{sep}{exp}').format(
             fwd=left_name, rev=right_name, sep=',', gi=infos[2],
             left_primer=current_pair[0],
-            right_primer=current_pair[1], start=infos[3], stop=infos[7],
+            right_primer=current_pair[1], start=infos[3], stop=int(infos[7]) + len(current_pair[1]),
             size=infos[8], exp=1 if expected_hit else 0
         )
         return current_dict_key, res
