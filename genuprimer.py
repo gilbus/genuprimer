@@ -196,7 +196,17 @@ def main():
         output.write('\n')
 
 
-def parse_existing_primer(prefix):
+def parse_existing_primer(prefix: str) -> dict:
+    """
+    This function reads the files containing the custom primer pairs and stores
+    them in the same way newly generated would be stored. Only complete pairs
+    are stored. If one file contains m and the other n sequences, given n < m
+    only n pairs would be returned and the m-n discarded.
+    :param prefix: Prefix for files containing the primer, expected to be
+    readable from prefix_{left,right}.fas
+    :return: Dictionary containing all primer, accessible via sorted
+    concatenation of their names
+    """
     left_name = "{}_left.fas".format(prefix)
     right_name = "{}_right.fas".format(prefix)
     try:
@@ -270,11 +280,11 @@ def parse_existing_primer(prefix):
                                             primer_right_list):
         l_seq = l_seq.replace('\n', '').replace('\r', '')
         r_seq = r_seq.replace('\n', '').replace('\r', '')
-        primer_dict.update({(l_id, r_id): (l_seq, r_seq)})
+        primer_dict.update({tuple(sorted((l_id, r_id))): (l_seq, r_seq)})
     return primer_dict
 
 
-def extract_fasta_seq(fasta_file):
+def extract_fasta_seq(fasta_file: '_io.TextIOWrapper') -> str:
     """
     Gets a file buffer pointing at the beginning of a sequence. The file is read
     and the line content added to an internal buffer until a the sequence ends
@@ -291,7 +301,7 @@ def extract_fasta_seq(fasta_file):
     return seq.replace('\n', '').replace('\r', '')
 
 
-def extract_included_region(config):
+def extract_included_region(config: configparser.SectionProxy) -> tuple:
     """
     This functions extracts the region for which primer shall be generated
     from the config file.
@@ -498,7 +508,7 @@ def setup_bowtie(fasta_file: '_io.TextIOWrapper', debug: bool,
     """
     If no bowtie-index is specified we have to build it.
     :param fasta_file: io-wrapper of the file with sequences that shall be
-    indexec, needed to determine name of index
+    indexed, needed to determine name of index
     :param debug: whether debug logging is set on or off.
     :param bowtie_exec: str containing the path to bowtie executable.
     bowtie-build is supposed to be in the same folder.
@@ -513,22 +523,23 @@ def setup_bowtie(fasta_file: '_io.TextIOWrapper', debug: bool,
     # FASTA-file containing the sequences
     bowtie_index = "{index_dir}/{prefix}_bowtie".format(
         index_dir=bowtie_index_dir,
-        prefix=
-        re.split("/|\.", fasta_file.name)[-2])
+        prefix=re.split("/|\.", fasta_file.name)[-2])
     bowtie_build = bowtie_exec + '-build'
     args = [bowtie_build, fasta_file.name, bowtie_index]
     logging.info('bowtie-build command: {}'.format(args))
     if not debug:
         # We are not in debug-mode so no output will be shown
-        subprocess.call(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.call(args, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL)
     else:
         # debug-mode, show everything
         subprocess.call(args)
     return bowtie_index
 
 
-def run_bowtie(bowtie_index, files_prefix, bowtie_exec: str, silent, size_range,
-               bowtie_output) -> str:
+def run_bowtie(bowtie_index: str, files_prefix: str, bowtie_exec: str,
+               silent: bool, size_range: tuple,
+               bowtie_output: bool) -> list:
     """
     Calls bowtie to execute the search for matches of the designed primers with
     other sequences.
@@ -539,8 +550,8 @@ def run_bowtie(bowtie_index, files_prefix, bowtie_exec: str, silent, size_range,
     shall be shown
     :param size_range: given size range of the primer, we therefore only look
     for inserts of this size range
-    :param bowtie_output:
-    :return:
+    :param bowtie_output: whether output of bowtie shall be written to STDERR
+    :return: list of tuples consisting of the hits
     """
     # determine name of files where the previously found primers are stored
     left = "{}_left.fas".format(files_prefix)
@@ -576,23 +587,26 @@ def run_bowtie(bowtie_index, files_prefix, bowtie_exec: str, silent, size_range,
                      '--show-bowtie')
         print('\n'.join(res), file=sys.stderr)
         sys.stderr.flush()
+
+    # Each match is described in two lines since FWD and REV have to match.
     res_tuple = [
         (res[i], res[i + 1]) for i in range(0, len(res) - 1, 2)]
     return res_tuple
 
 
-def generate_primer(sequence, primer3_config, primer_file_prefix,
-                    seq_included_region):
+def generate_primer(sequence: str, primer3_config: configparser.SectionProxy,
+                    primer_file_prefix: str,
+                    seq_included_region: tuple) -> dict:
     """
     Calls the primer3-module with the settings and separates the results in
     left and right primer pairs.
-    :param primer_file_prefix: prefix for the files where the primer pairs will
-    be stored.
     :param sequence: Sequence template for the primers
     :param primer3_config: containing the settings for primer3
+    :param primer_file_prefix: prefix for the files where the primer pairs will
+    be stored.
+    :param seq_included_region: tuple containing positions for which
+    primer shall be generated
     :return: A dictionary containing all primer pairs and their names
-    and the tuple with specified
-    SEQUENCE_INCLUDED_REGION since this values are also parsed in this function
     """
     primer3_config_dict = {}  # type: dict
     # are any specific settings for primer3?
@@ -670,7 +684,7 @@ def generate_primer(sequence, primer3_config, primer_file_prefix,
     primerfile_right = open(
         '{prefix}_right.fas'.format(prefix=primer_file_prefix), 'w')
 
-    def extract_number(x):
+    def extract_number(x: str) -> int:
         """
         Extracts the number of the name of a generated primer
         :param x: primer-id
@@ -692,7 +706,7 @@ def generate_primer(sequence, primer3_config, primer_file_prefix,
         right_line = ">{}\n{}\n\n".format(right_key, primer_right[right_key])
         primerfile_left.write(left_line)
         primerfile_right.write(right_line)
-        primer_dict.update({(left_key, right_key): (
+        primer_dict.update({tuple(sorted((left_key, right_key))): (
             primer_left[left_key], primer_right[right_key])})
 
     primerfile_left.close()
@@ -701,10 +715,10 @@ def generate_primer(sequence, primer3_config, primer_file_prefix,
     return primer_dict
 
 
-def parse_arguments():
+def parse_arguments() -> argparse.Namespace:
     """
-    This function parses the commandline arguments via the argparse-module, which additionally generates
-    a help-hook, if a parameter is passed wrong.
+    This function parses the commandline arguments via the argparse-module,
+    which additionally generates a help-hook, if a parameter is passed wrong.
     :return: A parser-object containing all parsed values.
     """
     parser = argparse.ArgumentParser(
@@ -828,15 +842,14 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def parse_fasta(fasta_file, seq_id):
+def parse_fasta(fasta_file: '_io.TextIOWrapper', seq_id: str) -> tuple:
     """
     Parses the submitted FASTA-File and extracts the sequence for primer3.
-    :type fasta_file: argparse.FileType
-    :type seq_id: str
-    :param seq_id: identifier of the sequence, for which primers should be generated
-    :param fasta_file: already readable-opened file which contains all the sequences
+    :param seq_id: identifier of the sequence, for which primers shall
+    be generated
+    :param fasta_file: already readable-opened file which
+    contains all the sequences
     """
-    seq = ""
     seq_id_header = ""
     # no sequence-id specified, therefore the first one is taken
     if not seq_id:
