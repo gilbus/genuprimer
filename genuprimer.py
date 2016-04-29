@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+Author: tluettje@techfak.uni-bielefeld.de
+License: AGPL
+"""
 import argparse
 import ast
 import configparser
