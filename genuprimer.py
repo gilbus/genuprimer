@@ -99,7 +99,9 @@ def main():
             logging.info(
                 'No additional file with sequences for primer-generation '
                 'specified')
-        # extract wanted sequence from sequences
+        """
+        Extract sequence from FASTA file and get exact id of it as well
+        """
         sequence, seq_id = parse_fasta(sequences, args.sequence)
         if not sequence:
             logging.error(
@@ -107,12 +109,10 @@ def main():
             sys.exit(1)
         logging.info('Successfully extracted sequence')
 
-        if args.config is None:
-            general_conf = None
-        else:
-            general_conf = config['default']
-        # generate primers, dependent on sequence, primer3-configuration
-        # and names of the files containing the found primers
+        """
+        Generate primer pairs, depending on extracted sequence, primer3
+        configuration and specified region for which primer shall be generated.
+        """
         primer_dict = generate_primer(sequence, primer3_conf, args.primerfiles,
                                       seq_included_region)
     else:
@@ -211,32 +211,67 @@ def parse_existing_primer(prefix):
                 left_name, right_name
             ))
         sys.exit(1)
-    primer_left_list = []
-    primer_right_list = []
-    for line in left_primer:
-        if line[0] == '>':
-            # extract id from header
-            seq_id = line.split('>')[1].split()[0]
-            sequence = extract_fasta_seq(left_primer)
-            primer_left_list.append((seq_id, sequence))
 
+    primer_left_lines = left_primer.readlines()
+    primer_right_lines = right_primer.readlines()
+    left_primer.close()
+    right_primer.close()
+
+    primer_left_list = []
+    sequence = seq_id = ""
+    for left_line in primer_left_lines:
+        # begin of new sequence
+        if left_line[0] == '>':
+            if sequence != "":
+                # we were previously reading a sequence therefore store it
+                # before starting with a new one
+
+                # sanitize sequence from newlines
+                sequence = sequence.replace('\n', '').replace('\r', '')
+                primer_left_list.append((seq_id, sequence))
+                sequence = ""
+            # extract id from header
+            seq_id = left_line.split('>')[1].split()[0]
+        else:
+            sequence += left_line
+    # append final sequence to list
+    if sequence != "":
+        sequence = sequence.replace('\n', '').replace('\r', '')
+        primer_left_list.append((seq_id, sequence))
+
+    print(primer_left_list)
+    primer_right_list = []
+    sequence = seq_id = ""
+    for right_line in primer_right_lines:
+        # begin of new sequence
+        if right_line[0] == '>':
+            if sequence != "":
+                # we were previously reading a sequence therefore store it
+                # before starting with a new one
+                sequence = sequence.replace('\n', '').replace('\r', '')
+                # sanitize sequence from newlines
+                primer_right_list.append((seq_id, sequence))
+                sequence = ""
+            # extract id from header
+            seq_id = right_line.split('>')[1].split()[0]
+        else:
+            sequence += right_line
+    if sequence != "":
+        sequence = sequence.replace('\n', '').replace('\r', '')
+        primer_right_list.append((seq_id, sequence))
+
+    print(primer_right_list)
     logging.debug('Extracted following primer from {}: {}'.format(
         left_name, ' ,'.join(map(str, primer_left_list))
     ))
-
-    for line in right_primer:
-        if line[0] == '>':
-            # extract id from header
-            seq_id = line.split('>')[1].split()[0]
-            sequence = extract_fasta_seq(right_primer)
-            primer_right_list.append((seq_id, sequence))
-
     logging.debug('Extracted following primer from {}: {}'.format(
         right_name, ' ,'.join(map(str, primer_right_list))
     ))
     primer_dict = {}  # type: dict
     for (l_id, l_seq), (r_id, r_seq) in zip(primer_left_list,
                                             primer_right_list):
+        l_seq = l_seq.replace('\n', '').replace('\r', '')
+        r_seq = r_seq.replace('\n', '').replace('\r', '')
         primer_dict.update({(l_id, r_id): (l_seq, r_seq)})
     return primer_dict
 
@@ -413,8 +448,6 @@ def parse_bowtie_result(primer_tuple, error_values, primer_dict,
             expected_hit = seq_included_region[0] <= int(infos[3]) <= int(
                 infos[7]) <= seq_included_region[1] and infos[2].startswith(
                 seq_id)
-            print(infos[3], seq_included_region[0], infos[7],
-                  seq_included_region[1], infos[2], expected_hit)
         else:
             """
             A match is expected if its start and end position are inside
@@ -424,8 +457,6 @@ def parse_bowtie_result(primer_tuple, error_values, primer_dict,
             """
             expected_hit = seq_included_region[0] <= int(infos[3]) <= int(
                 infos[7]) <= seq_included_region[1] and infos[2] == seq_id
-            print(infos[3], seq_included_region[0], infos[7],
-                  seq_included_region[1], infos[2], expected_hit)
 
         # format results to result format
         res = ('{fwd}{sep}{rev}{sep}{gi}{sep}{left_primer}{sep}{right_primer}'
@@ -635,6 +666,7 @@ def generate_primer(sequence, primer3_config, primer_file_prefix,
     primerfile_left.close()
     primerfile_right.close()
 
+    print(primer_dict)
     return primer_dict
 
 
