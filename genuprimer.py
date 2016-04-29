@@ -14,6 +14,8 @@ import primer3
 MANDATORY_VALUES = {'last_must_match', 'last_to_check', 'last_max_error'}
 RESULT_HEADER = "FWD_ID,REV_ID,MATCH_ID,FWD,REV,START,STOP,LENGTH,EXP"
 
+MAX_NUMBER_OF_MATCHES = 5
+
 
 def main():
     """
@@ -141,31 +143,51 @@ def main():
                                product_size_range, args.bowtie_output)
 
     # create empty list for results
-    results = []
+    results = {}
     for primer_tuple in bowtie_result:
-        res = parse_bowtie_result(primer_tuple, config['default'],
-                                  primer_dict, seq_included_region,
-                                  args.additionalFasta is not None,
-                                  seq_id)
+        current_key, res = parse_bowtie_result(primer_tuple, config['default'],
+                                               primer_dict, seq_included_region,
+                                               args.additionalFasta is not None,
+                                               seq_id)
         if res is not None:
-            results.append(res)
+            results.setdefault(current_key, []).append(res)
         else:
             continue
 
-    # sort results by primer pair number
-    # results = list(
-    #     sorted(results, key=lambda x: int(x.split(',')[0].split('_')[-1])))
-    # add header at the beginning
-    results.insert(0, RESULT_HEADER)
+    # get value defined in config or fallback otherwise
+    max_number_matches = config['default'].getint('MAX_NUMBER_OF_MATCHES',
+                                                  MAX_NUMBER_OF_MATCHES)
+    logging.info('Maximal number of allowed matches set to {}'.format(
+        max_number_matches))
 
+    # set output either to STDOUT or output file if specified by user
     if args.output is None:
         logging.info('No file for output specified, writing to STDOUT.')
-        print('\n'.join(results))
+        output = sys.stdout
     else:
         logging.info('Output file specified, writing results to {}'.format(
             args.output.name))
-        for line in results:
-            args.output.write('{}\n'.format(line))
+        output = args.output
+
+    # store intermediate all results which would be printed in output
+    printable_res = []
+    for key in sorted(results.keys()):
+        matches = results[key]
+        if len(matches) > max_number_matches:
+            logging.debug(
+                'Not printing results for {} because it has {} matches'.format(
+                    key, len(matches)
+                ))
+        else:
+            # add to intermediate results
+            printable_res.append(matches)
+
+    output.write(RESULT_HEADER + '\n')
+    for matches in sorted(printable_res, key=len):
+        # write results
+        output.write('\n'.join(matches))
+        # final newline at end of results
+        output.write('\n')
 
 
 def parse_existing_primer(prefix):
@@ -303,7 +325,7 @@ def parse_bowtie_result(primer_tuple, error_values, primer_dict,
     if len(primer_tuple[0].split()) <= 12 or len(primer_tuple[1].split()) <= 12:
         # if bowtie result line is so short it means no hit has been found
         # and obviously a non existent match cannot be significant
-        return None
+        return None, None
     # split bowtie results for forward and reverse primer of one pair
     [left_split, right_split] = list(map(str.split, primer_tuple))
     # get string representation of mismatch bases
@@ -331,8 +353,13 @@ def parse_bowtie_result(primer_tuple, error_values, primer_dict,
     # check whether the hit reported bowtie is significant according to users
     # preferences
     if is_significant(left_res) and is_significant(right_res):
+        # extract information from one of the results
         infos = left_split
-        current_pair = primer_dict.get(tuple(sorted((left_name, right_name))))
+        # generate key for dictionary containing all primer
+        # for current bowtie results
+        current_dict_key = tuple(sorted((left_name, right_name)))
+        # get current sequences
+        current_pair = primer_dict.get(current_dict_key)
 
         if additional_fasta or seq_id is None:
             # if primer have been generated using an additional file we cannot
@@ -355,9 +382,9 @@ def parse_bowtie_result(primer_tuple, error_values, primer_dict,
             right_primer=current_pair[1], start=infos[3], stop=infos[7],
             size=infos[8], exp=1 if expected_hit else 0
         )
-        return res
+        return current_dict_key, res
     else:
-        return None
+        return None, None
 
 
 def setup_bowtie(fasta_file, debug, bowtie_exec):
