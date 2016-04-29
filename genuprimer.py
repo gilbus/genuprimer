@@ -563,7 +563,8 @@ def run_bowtie(bowtie_index: str, files_prefix: str, bowtie_exec: str,
         # value is specified, try to parse it as list
         try:
             tmp = ast.literal_eval(size_range)
-            if type(tmp) == list and type(tmp[0]) == type(tmp[1]) == int:
+            if type(tmp) == list and isinstance(tmp[0], int) and isinstance(
+                tmp[1], int):
                 args += ['--minins', str(tmp[0]), '--maxins', str(tmp[1])]
 
         except (ValueError, SyntaxError):
