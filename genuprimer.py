@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: tluettje@techfak.uni-bielefeld.de
-License: AGPL
+License: AGPL v3
 """
 import argparse
 import ast
@@ -11,12 +11,14 @@ import os
 import re
 import subprocess
 import sys
-from argparse import RawTextHelpFormatter
 
 import primer3
 
 MANDATORY_VALUES = {'last_must_match', 'last_to_check', 'last_max_error'}
 RESULT_HEADER = "FWD_ID,REV_ID,MATCH_ID,FWD,REV,START,STOP,LENGTH,EXP"
+LOGGING_LEVEL = {'WARNING': logging.WARNING,
+                 'INFO': logging.INFO,
+                 'DEBUG': logging.DEBUG}
 
 MAX_NUMBER_OF_MATCHES = 5
 
@@ -32,7 +34,7 @@ def main():
     # colors are only working on linux
     logging.addLevelName(logging.WARNING,
                          # format yellow
-                         "\033[1;33m%s\033[1;0m" % logging.getLevelName(
+                         "\033[1;35m%s\033[1;0m" % logging.getLevelName(
                              logging.WARNING))
     logging.addLevelName(logging.ERROR,
                          # format red
@@ -44,9 +46,10 @@ def main():
                              logging.INFO))
     logging.addLevelName(logging.DEBUG,
                          # format blue
-                         "\033[1;34m%s\033[1;0m" % logging.getLevelName(
+                         "\033[1;36m%s\033[1;0m" % logging.getLevelName(
                              logging.DEBUG))
-    logging.basicConfig(format='%(levelname)s:%(message)s', level=args.loglevel)
+    logging.basicConfig(format='%(levelname)s: %(message)s',
+                        level=LOGGING_LEVEL[args.loglevel])
     logging.debug('Received arguments: {}'.format(args))
     # Parsing of the config file to get primer3-settings
     config = configparser.ConfigParser()
@@ -218,9 +221,9 @@ def parse_existing_primer(prefix: str) -> dict:
         right_primer = open(right_name, 'r')
     except FileNotFoundError:
         logging.error(
-            'Could not find or read one or both of the files'
-            'containing the primers that should be used for this run'
-            'instead of generating new one.'
+            'Could not find or read one or both of the files '
+            'containing the primers that should be used for this run '
+            'instead of generating new one.\n'
             'Looking for files: {} and {}. Aborting'.format(
                 left_name, right_name
             ))
@@ -733,11 +736,11 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=
         """
-        Call primer3 to generate primers and validate
-        their uniqueness among other
-        sequences with the help of bowtie.
+        genuprimer is able to generate new primer by calling primer3 and
+        afterwards validate their uniqueness among other sequences by calling
+        bowtie. The same can be accomplished for already existing primer pairs.
         """
-        , formatter_class=RawTextHelpFormatter
+        , formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
         "FastaFile", type=argparse.FileType('r'),
@@ -748,11 +751,12 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
         help=
         """
-        ID of the sequence which should be given to primer3.
-        If an additional FASTA-File for primer-generation is passed via '-a'
-        it will be searched, otherwise the FastaFile.
-        Prefix-matching is used for identification
-        and the first hit will be used.
+        Partial ID of the sequence for which the primer shall be or have been
+        generated.
+        Used for primer generation to extract the chosen sequence from FastaFile
+        and during validation by bowtie if --keep-primer has been set.
+        If this option is skipped the first sequence from FastaFile or
+        additionalFasta, if omitted, is used.
         """
     )
     parser.add_argument(
@@ -760,7 +764,7 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
         help=
         """
-        An additional file containing the sequence for which primer should be
+        An additional file containing the sequence for which primer shall be
         generated. First sequence inside of the file is taken if not specified
         otherwise via '-s'.
         """
@@ -768,28 +772,31 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "-p", "--primerfiles", type=str, default="primer3", help=
         """
-        Prefix for the files where the primer will be stored. The suffixes will be 'left' and 'right'.
+        Prefix for the files where the primer pairs will be stored if new ones
+        are generated. The suffixes will be '_left.fas' and '_right.fas'.
         Therefore if the default remains, their names will be
-        'primer3_left.fas' and 'primer3_right.fas'
+        'primer3_left.fas' and 'primer3_right.fas'. If using --keep-primer
+        the custom files must follow this convention.
         """
     )
     parser.add_argument(
         '-i', '--index', type=str, default=None, help=
         """
-        Use existing bowtie-index. This option is directly forwarded to bowtie.
+        Specify an existing bowtie-index otherwise a new one will be generated
+        for FastaFile. This option is directly forwarded to bowtie.
         """
     )
     parser.add_argument(
-        '-d', '--debug',
-        help="Print lots of debugging statements",
-        action="store_const", dest="loglevel", const=logging.DEBUG,
-        default=logging.WARNING,
+        '-v', '--verbose',
+        help="Be verbose by showing INFO messages.",
+        action="store_const", dest="loglevel", const='INFO',
+        default='WARNING',
     )
     parser.add_argument(
-        '-v', '--verbose',
-        help="Be verbose",
-        action="store_const", dest="loglevel", const=logging.INFO,
-        default=logging.WARNING,
+        '-d', '--debug',
+        help="Print lots of DEBUG messages.",
+        action="store_const", dest="loglevel", const='DEBUG',
+        default='WARNING',
     )
     parser.add_argument(
         '-c', '--config', type=argparse.FileType("r"),
