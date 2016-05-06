@@ -22,16 +22,25 @@ LOGGING_LEVEL = {'WARNING': logging.WARNING,
 
 MAX_NUMBER_OF_MATCHES = 5
 
+PRIMER3_OPTIONS = {}  # type: dict
 
-def main():
+BOWTIE_RUN_OPTIONS = {}  # type: dict
+
+BOWTIE_PARSE_OPTIONS = {'LAST_MUST_MATCH': 3,
+                        'LAST_TO_CHECK': 12,
+                        'LAST_MAX_ERROR': 5,
+                        'MAX_NUMBER_OF_MATCHES': 5}
+
+
+def setup_logging(loglevel: str):
     """
-    Delegates all tasks to the other functions.
-    :return:
+    Setups the logging functionality, sets colors for different log levels
+    and parses the loglevel chosen by user.
+    :param loglevel: chosen loglevel by user
+    :return: None
     """
-    # parse all arguments, let the argparse-module do its wonderful work
-    args = parse_arguments()
     # setup logging and level as well as colors for logging
-    # colors are only working on linux
+    # colors are only working on UNIX-Shells
     logging.addLevelName(logging.WARNING,
                          # format yellow
                          "\033[1;35m%s\033[1;0m" % logging.getLevelName(
@@ -49,7 +58,22 @@ def main():
                          "\033[1;36m%s\033[1;0m" % logging.getLevelName(
                              logging.DEBUG))
     logging.basicConfig(format='%(levelname)s: %(message)s',
-                        level=LOGGING_LEVEL[args.loglevel])
+                        level=LOGGING_LEVEL[loglevel])
+
+
+def parse_config_and_parameters(args: argparse.Namespace,
+                                config: configparser.ConfigParser):
+    pass
+
+
+def main():
+    """
+    Delegates all tasks to the other functions.
+    """
+    # parse all arguments, let the argparse-module do its wonderful work
+    args = parse_arguments()
+    # setup logging
+    setup_logging(args.loglevel)
     logging.debug('Received arguments: {}'.format(args))
     # Parsing of the config file to get primer3-settings
     config = configparser.ConfigParser()
