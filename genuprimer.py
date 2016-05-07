@@ -14,22 +14,25 @@ import sys
 
 import primer3
 
+# Constants
 MANDATORY_VALUES = {'last_must_match', 'last_to_check', 'last_max_error'}
 RESULT_HEADER = "FWD_ID,REV_ID,MATCH_ID,FWD,REV,START,STOP,LENGTH,EXP"
 LOGGING_LEVEL = {'WARNING': logging.WARNING,
                  'INFO': logging.INFO,
                  'DEBUG': logging.DEBUG}
 
-MAX_NUMBER_OF_MATCHES = 5
+primer3_range = ()  # type: tuple
 
-PRIMER3_OPTIONS = {}  # type: dict
+primer3_size = ()  # type: tuple
 
-BOWTIE_RUN_OPTIONS = {}  # type: dict
-
-BOWTIE_PARSE_OPTIONS = {'LAST_MUST_MATCH': 3,
+bowtie_parse_options = {'LAST_MUST_MATCH': 3,
                         'LAST_TO_CHECK': 12,
                         'LAST_MAX_ERROR': 5,
-                        'MAX_NUMBER_OF_MATCHES': 5}
+                        'LIMIT_NUMBER_OF_MATCHES': 5}
+
+config_name = 'genuprimer.conf'
+
+bowtie_index = 'bowtie-index'
 
 
 def setup_logging(loglevel: str):
@@ -63,7 +66,42 @@ def setup_logging(loglevel: str):
 
 def parse_config_and_parameters(args: argparse.Namespace,
                                 config: configparser.ConfigParser):
-    pass
+    # convert args namespace to normal dictionary
+    args = vars(args)
+    if config is not None:
+        if config.has_section('default'):
+            logging.info('Found [default]-section in config')
+            section = config['default']  # type: configparser.SectionProxy
+            for key in section:  # type: str
+                if key.upper() in bowtie_parse_options.keys():
+                    logging.debug(('Found key {k} with value {v} in '
+                                   '[default]-config').format(
+                        k=key, v=section[key])
+                    )
+                    # get key from config and if it fails during conversion
+                    # to an integer use the default value
+                    value = section.getint(section[key],
+                                           bowtie_parse_options[key.upper()])
+                    if value <= 0:
+                        logging.warning(
+                            ('Found key {key} with non negative value in '
+                             'default config: {v}. Ignoring').format(key=key,
+                                                                     v=value))
+                    else:
+                        bowtie_parse_options[key.upper()] = value
+                if key.upper() in args.keys():
+                    logging.debug(('Found key {k} with value {v} in '
+                                   'cmd-args').format(
+                        k=key, v=section[key])
+                    )
+                    value = args[key]
+                    if value <= 0:
+                        logging.warning(
+                            ('Found key {key} with non negative value in '
+                             'cmd args: {v}. Ignoring').format(key=key,
+                                                               v=value))
+                    else:
+                        bowtie_parse_options[key.upper()] = args[key]
 
 
 def main():
@@ -77,18 +115,8 @@ def main():
     logging.debug('Received arguments: {}'.format(args))
     # Parsing of the config file to get primer3-settings
     config = configparser.ConfigParser()
-    config.read(args.config.name)
-    logging.info('Successfully read config {}'.format(args.config.name))
-    # check whether all mandatory values are present in config
-    if not MANDATORY_VALUES.issubset(set(config['default'])):
-        logging.error(
-            'Not all mandatory values found in default-section '
-            'of the config. Missing: {}'.format(
-                list(map(lambda x: x.upper(),
-                         set(MANDATORY_VALUES.difference(
-                             set(config['default'])))))
-            ))
-        sys.exit(1)
+    config.read(CONFIG_NAME)
+    logging.info('Successfully read config {}'.format(CONFIG_NAME))
 
     # length of the insert between the primer pair
     product_size_range = None
@@ -758,57 +786,92 @@ def parse_arguments() -> argparse.Namespace:
     :return: A parser-object containing all parsed values.
     """
     parser = argparse.ArgumentParser(
-        description=
-        """
+        description="""
         genuprimer is able to generate new primer by calling primer3 and
         afterwards validate their uniqueness among other sequences by calling
         bowtie. The same can be accomplished for already existing primer pairs.
-        """
-        , formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        """, formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
-        "FastaFile", type=argparse.FileType('r'),
+        "FastaFile", type=argparse.FileType('r'), metavar='path_to_file',
         help="File containing the sequences in FASTA-Format"
     )
     parser.add_argument(
-        "-s", "--sequence", type=str,
-        default=None,
-        help=
-        """
-        Partial ID of the sequence for which the primer shall be or have been
-        generated.
-        Used for primer generation to extract the chosen sequence from FastaFile
-        and during validation by bowtie if --keep-primer has been set.
-        If this option is skipped the first sequence from FastaFile or
-        additionalFasta, if omitted, is used.
-        """
+        "-s", "--sequence", type=str, metavar='prefix_of_seq_id',
+        default=None, help="""Partial ID of the sequence for which the primer
+        shall be or have been generated."""
+    )
+    parser.add_argument(
+        '-c', '--config', type=str,
+        default=config_name, help="""Configfile with various parameters. Has to
+        include a '[default]'-section at top of the file, otherwise it can
+        not be parsed.""", metavar='path_to_config'
     )
     parser.add_argument(
         "-a", "--additionalFasta", type=argparse.FileType('r'),
-        default=None,
-        help=
-        """
-        An additional file containing the sequence for which primer shall be
-        generated. First sequence inside of the file is taken if not specified
-        otherwise via '-s'.
-        """
+        default=None, metavar='path_to_file',
+        help="""An additional file containing the sequence for which primer
+        shall be generated. First sequence inside of the file is taken if
+        not specified otherwise via '-s'."""
     )
     parser.add_argument(
-        "-p", "--primerfiles", type=str, default="primer3", help=
-        """
-        Prefix for the files where the primer pairs will be stored if new ones
-        are generated. The suffixes will be '_left.fas' and '_right.fas'.
-        Therefore if the default remains, their names will be
-        'primer3_left.fas' and 'primer3_right.fas'. If using --keep-primer
-        the custom files must follow this convention.
-        """
+        '--size', type=int, nargs=2, metavar=('min_size, ', 'max_size'),
+        help="Size range of the primer."
     )
     parser.add_argument(
-        '-i', '--index', type=str, default=None, help=
-        """
-        Specify an existing bowtie-index otherwise a new one will be generated
-        for FastaFile. This option is directly forwarded to bowtie.
-        """
+        '--pos', type=int, nargs=2, metavar=('begin, ', 'end'),
+        help="Region between the primer which is not overlapped by them."
+    )
+    parser.add_argument(
+        '-i', '--index', type=str, default=bowtie_index + '/{FastaFile}', help="""
+        If no bowtie-index is specified or found a new one will be generated
+        for FastaFile. This option is directly forwarded to bowtie."""
+    )
+    parser.add_argument(
+        '-o', '--output', type=argparse.FileType('w'), nargs='?',
+        default=sys.stdout, help="""Output where the results should be stored.
+        Default is standard output. Results are written as comma separated
+        values (.csv)."""
+    )
+    parser.add_argument(
+        "--keep-primer", dest='keep_primer', action='store_true',
+        help="""Set this option to start another run with the same primers from
+        last run or some custom ones."""
+    )
+    parser.add_argument(
+        '--last-must-match', dest='LAST_MUST_MATCH', type=int,
+        help="How many of the last bases of a primer have to match to consider "
+             "it a hit?", default=bowtie_parse_options['LAST_MUST_MATCH']
+    )
+    parser.add_argument(
+        '--last-to-check', dest='LAST_TO_CHECK', type=int,
+        help="How many of the last bases of a primer should be checked "
+             "considering LAST_MAX_ERROR.",
+        default=bowtie_parse_options['LAST_TO_CHECK']
+    )
+    parser.add_argument(
+        '--last-max-error', dest='LAST_MAX_ERROR', type=int,
+        help="Maximum number of mismatches allowed to occur in the last "
+             "LAST_TO_CHECK bases of a primer to consider it a hit.",
+        default=bowtie_parse_options['LAST_MAX_ERROR']
+    )
+    parser.add_argument(
+        '-l', '--limit-number-of-matches', dest='LIMIT_NUMBER_OF_MATCHES',
+        help="Maximum number of hits of a primer pair before it is "
+             "omitted from the results.", type=int,
+        default=bowtie_parse_options['LIMIT_NUMBER_OF_MATCHES']
+    )
+    parser.add_argument(
+        '--primer3', nargs=2, action='append',
+        metavar=('primer3_option, ', 'value'), help="""Append any custom options
+        for primer3 where value is a number, with or without floating point."""
+    )
+    parser.add_argument(
+        "-p", "--primerfiles", type=str, default="primer3", help="""
+        Prefix for the files where the primer pairs will be written to,
+        if new ones are generated, or location of existing ones
+        (see --keep-primer) with suffixes '_left.fas' and '_right.fas'.""",
+        metavar='prefix'
     )
     parser.add_argument(
         '-v', '--verbose',
@@ -823,60 +886,15 @@ def parse_arguments() -> argparse.Namespace:
         default='WARNING',
     )
     parser.add_argument(
-        '-c', '--config', type=argparse.FileType("r"),
-        default=None, help=
-        """
-        Configfile with various parameters which are
-        passed through to primer3. Has to include a
-        'default'-section
-        at top of the file, a 'primer3' section with the settings and a
-        'bowtie' section.
-        A default config is distributed with this programm.
-        Non-working example:
-        [default]
-        SEQUENCE_INCLUDED_BEGIN = 30
-        # other settings
-
-        [bowtie]
-        MaxInsSize = 100
-        # more settings
-
-        [primer3]
-        PRIMER_OPT_SIZE = 14
-        # more settings
-        """, required=True)
-    parser.add_argument(
-        '-o', '--output', type=argparse.FileType('w'),
-        default=None, help=
-        """
-        File where the results should be stored. Default is printing to STDOUT.
-        Results are written as comma separated values (.csv).
-        """
+        "--show-bowtie", dest='bowtie_output', action='store_true',
+        help="""Set this option to show the original results of bowtie, written
+        to standard error output."""
     )
     parser.add_argument(
         "--bowtie", type=str,
-        default="bowtie",
-        help=
-        """
-        The bowtie executable if not in PATH. If needed bowtie-build is expected
-        to be found via appending '-build' to bowtie.
-        """
-    )
-    parser.add_argument(
-        "--show-bowtie", dest='bowtie_output', action='store_true',
-        help=
-        """
-        Set this option to show the original results of bowtie, written to
-        STDERR.
-        """
-    )
-    parser.add_argument(
-        "--keep-primer", dest='keep_primer', action='store_true',
-        help=
-        """
-        Set this option to start another run with the same primers from last run
-        or some custom one.
-        """
+        default="bowtie", metavar='path_to_bowtie_executable',
+        help="""The bowtie executable if not in PATH. If needed bowtie-build
+        is expected to be found via appending '-build' to bowtie."""
     )
     parser.set_defaults(keep_primer=False, bowtie_output=False)
     return parser.parse_args()
