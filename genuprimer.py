@@ -20,6 +20,8 @@ RESULT_HEADER = "FWD_ID,REV_ID,MATCH_ID,FWD,REV,START,STOP,LENGTH,EXP"
 LOGGING_LEVEL = {'WARNING': logging.WARNING,
                  'INFO': logging.INFO,
                  'DEBUG': logging.DEBUG}
+CONFIG_REGION_KEYS = ['SEQUENCE_INCLUDED_BEGIN', 'SEQUENCE_INCLUDED_END',
+                      'SEQUENCE_EXCLUDED_BEGIN', 'SEQUENCE_EXCLUDED_END']
 
 primer3_range = ()  # type: tuple
 
@@ -29,6 +31,8 @@ bowtie_parse_options = {'LAST_MUST_MATCH': 3,
                         'LAST_TO_CHECK': 12,
                         'LAST_MAX_ERROR': 5,
                         'LIMIT_NUMBER_OF_MATCHES': 5}
+
+primer3_options = {}  # type: dict
 
 config_name = 'genuprimer.conf'
 
@@ -70,7 +74,7 @@ def parse_config_and_parameters(args: argparse.Namespace,
     args = vars(args)
     if config is not None:
         if config.has_section('default'):
-            logging.info('Found [default]-section in config')
+            logging.info('Found [default] section in config')
             section = config['default']  # type: configparser.SectionProxy
             for key in section:  # type: str
                 if key.upper() in bowtie_parse_options.keys():
@@ -80,15 +84,42 @@ def parse_config_and_parameters(args: argparse.Namespace,
                     )
                     # get key from config and if it fails during conversion
                     # to an integer use the default value
-                    value = section.getint(section[key],
-                                           bowtie_parse_options[key.upper()])
-                    if value <= 0:
-                        logging.warning(
-                            ('Found key {key} with non negative value in '
-                             'default config: {v}. Ignoring').format(key=key,
-                                                                     v=value))
-                    else:
-                        bowtie_parse_options[key.upper()] = value
+                    bowtie_parse_options[key.upper()] = section.getint(
+                        section[key],
+                        bowtie_parse_options[key.upper()])
+                    # if value <= 0:
+                    #     logging.warning(
+                    #         ('Found key {key} with non negative value in '
+                    #          '[default] section: {v}. Ignoring').format(key=key,
+                    #                                                     v=value))
+                    # else:
+
+                if key.upper() in CONFIG_REGION_KEYS:
+                    logging.debug(('Found key {k} with value {v} in '
+                                   '[default]-config').format(
+                        k=key, v=section[key])
+                    )
+                    primer3_options[key.upper()] = section.getint(section[key], -1)
+
+                if key ==
+
+        if config.has_section('primer3'):
+            logging.info('Parsing [primer3] section in config.')
+            section = config['primer3']
+            # if yes, we have to parse them
+            for k in section.keys():
+                try:
+                    value = ast.literal_eval(section[k])
+                    logging.debug('Evaluated {key} to {v}: {t}'.format(
+                        key=k, v=value, t=type(value)
+                    ))
+                    primer3_options.update({str(k).upper(): value})
+                except (SyntaxError, ValueError):
+                    logging.warning(
+                        ('Could not parse option {key} with value {v} '
+                         'from [primer3] section. '
+                         'Ignoring value').format(key=k, v=section[k])
+                    )
                 if key.upper() in args.keys():
                     logging.debug(('Found key {k} with value {v} in '
                                    'cmd-args').format(
@@ -102,6 +133,10 @@ def parse_config_and_parameters(args: argparse.Namespace,
                                                                v=value))
                     else:
                         bowtie_parse_options[key.upper()] = args[key]
+            logging.debug('Final primer3-options-dictionary: {}'.format(
+                [str(k) + ": " + str(primer3_options[k]) for k in
+                 primer3_options.keys()]
+            ))  # set primer3-settings
 
 
 def main():
@@ -675,33 +710,14 @@ def generate_primer(sequence: str, primer3_config: configparser.SectionProxy,
     primer3_config_dict = {}  # type: dict
     # are any specific settings for primer3?
     if primer3_config is not None:
-        logging.info('Parsing primer3-settings from config')
-        # if yes, we have to parse them
-        for k in primer3_config.keys():
-            try:
-                value = ast.literal_eval(primer3_config[k])
-                logging.debug('Evaluated {key} to {v}: {t}'.format(
-                    key=k, v=value, t=type(value)
+        try:
+            primer3.setP3Globals(primer3_config_dict)
+        except TypeError as message:
+            logging.error(
+                'Settings for primer3 contain following error: {}\nAborting'.format(
+                    message
                 ))
-                primer3_config_dict.update({str(k).upper(): value})
-            except (SyntaxError, ValueError):
-                logging.warning(
-                    ('Could not parse option {key} with value {v} '
-                     'from primer3-config. '
-                     'Ignoring value').format(key=k, v=primer3_config[k])
-                )
-    logging.debug('Final primer3-options-dictionary: {}'.format(
-        [str(k) + ": " + str(primer3_config_dict[k]) for k in
-         primer3_config_dict.keys()]
-    ))  # set primer3-settings
-    try:
-        primer3.setP3Globals(primer3_config_dict)
-    except TypeError as message:
-        logging.error(
-            'Settings for primer3 contain following error: {}\nAborting'.format(
-                message
-            ))
-        sys.exit(1)
+            sys.exit(1)
 
     # remove any newlines or anything else like that
     sequence = sequence.replace('\n', '').replace('\r', '')
@@ -816,7 +832,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         '--size', type=int, nargs=2, metavar=('min_size, ', 'max_size'),
-        help="Size range of the primer."
+        help="Size range of the product including primers."
     )
     parser.add_argument(
         '--pos', type=int, nargs=2, metavar=('begin, ', 'end'),
