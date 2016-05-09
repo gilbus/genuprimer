@@ -15,17 +15,18 @@ import sys
 import primer3
 
 # Constants
-MANDATORY_VALUES = {'last_must_match', 'last_to_check', 'last_max_error'}
 RESULT_HEADER = "FWD_ID,REV_ID,MATCH_ID,FWD,REV,START,STOP,LENGTH,EXP"
 LOGGING_LEVEL = {'WARNING': logging.WARNING,
                  'INFO': logging.INFO,
                  'DEBUG': logging.DEBUG}
-CONFIG_REGION_KEYS = ['SEQUENCE_INCLUDED_BEGIN', 'SEQUENCE_INCLUDED_END',
-                      'SEQUENCE_EXCLUDED_BEGIN', 'SEQUENCE_EXCLUDED_END']
+CONFIG_REGION_KEYS = {'TARGET_POSITION_BEGIN': None,
+                      'TARGET_POSITION_END': None,
+                      'PRIMER_PRODUCT_SIZE_MIN': None,
+                      'PRIMER_PRODUCT_SIZE_MAX': None}
 
-primer3_range = ()  # type: tuple
+primer3_insert_size = ()  # type: tuple
 
-primer3_size = ()  # type: tuple
+primer3_insert_pos = ()  # type: tuple
 
 bowtie_parse_options = {'LAST_MUST_MATCH': 3,
                         'LAST_TO_CHECK': 12,
@@ -34,9 +35,17 @@ bowtie_parse_options = {'LAST_MUST_MATCH': 3,
 
 primer3_options = {}  # type: dict
 
-config_name = 'genuprimer.conf'
-
-bowtie_index = 'bowtie-index'
+# various runtime parameters and their default values
+runtime_parameters = {'fasta_file': None,
+                      'seq_id': '',
+                      'config': 'genuprimer.conf',
+                      'additional_fasta': None,
+                      'index': 'bowtie-index',
+                      'output': sys.stdout,
+                      'prefix': 'genuprimer',
+                      'bowtie': 'bowtie',
+                      'keep_primer': False,
+                      'show_bowtie_output': False}
 
 
 def setup_logging(loglevel: str):
@@ -72,9 +81,12 @@ def parse_config_and_parameters(args: argparse.Namespace,
                                 config: configparser.ConfigParser):
     # convert args namespace to normal dictionary
     args = vars(args)
-    if config is not None:
+    print(runtime_parameters)
+    print(config)
+    if config:
+        logging.info('Parsing configfile')
         if config.has_section('default'):
-            logging.info('Found [default] section in config')
+            logging.info('Found [default]-config in configfile')
             section = config['default']  # type: configparser.SectionProxy
             for key in section:  # type: str
                 if key.upper() in bowtie_parse_options.keys():
@@ -87,24 +99,17 @@ def parse_config_and_parameters(args: argparse.Namespace,
                     bowtie_parse_options[key.upper()] = section.getint(
                         section[key],
                         bowtie_parse_options[key.upper()])
-                    # if value <= 0:
-                    #     logging.warning(
-                    #         ('Found key {key} with non negative value in '
-                    #          '[default] section: {v}. Ignoring').format(key=key,
-                    #                                                     v=value))
-                    # else:
 
-                if key.upper() in CONFIG_REGION_KEYS:
+                if key.upper() in CONFIG_REGION_KEYS.keys():
                     logging.debug(('Found key {k} with value {v} in '
                                    '[default]-config').format(
                         k=key, v=section[key])
                     )
-                    primer3_options[key.upper()] = section.getint(section[key], -1)
-
-                if key ==
-
+                    CONFIG_REGION_KEYS[key.upper()] = section.getint(
+                        section[key],
+                        -1)
         if config.has_section('primer3'):
-            logging.info('Parsing [primer3] section in config.')
+            logging.info('Found [primer3]-config in configfile')
             section = config['primer3']
             # if yes, we have to parse them
             for k in section.keys():
@@ -120,23 +125,31 @@ def parse_config_and_parameters(args: argparse.Namespace,
                          'from [primer3] section. '
                          'Ignoring value').format(key=k, v=section[k])
                     )
-                if key.upper() in args.keys():
-                    logging.debug(('Found key {k} with value {v} in '
-                                   'cmd-args').format(
-                        k=key, v=section[key])
-                    )
-                    value = args[key]
-                    if value <= 0:
-                        logging.warning(
-                            ('Found key {key} with non negative value in '
-                             'cmd args: {v}. Ignoring').format(key=key,
-                                                               v=value))
-                    else:
-                        bowtie_parse_options[key.upper()] = args[key]
-            logging.debug('Final primer3-options-dictionary: {}'.format(
-                [str(k) + ": " + str(primer3_options[k]) for k in
-                 primer3_options.keys()]
-            ))  # set primer3-settings
+                    continue
+        logging.info('Finished parsing of configfile')
+        logging.debug('Current config values: {}'.format(
+            str(CONFIG_REGION_KEYS) + str(bowtie_parse_options)
+        ))
+
+    logging.info('Parsing commandline arguments')
+    runtime_parameters['show_bowtie_output'] = args['show_bowtie_output']
+    runtime_parameters['keep_primer'] = args['keep_primer']
+    for key in bowtie_parse_options:
+        bowtie_parse_options[key] = args[key]
+    if args['size']:
+        global primer3_insert_size
+        primer3_insert_size = tuple(args['size'])
+    if args['pos']:
+        global primer3_insert_pos
+        primer3_insert_pos = tuple(args['pos'])
+
+
+def args_store_values(key: str):
+    class StoreValues(argparse.Action):
+        def __call__(self, parser, namespace, value, option_string=None):
+            runtime_parameters[key] = value
+
+    return StoreValues
 
 
 def main():
@@ -148,146 +161,155 @@ def main():
     # setup logging
     setup_logging(args.loglevel)
     logging.debug('Received arguments: {}'.format(args))
-    # Parsing of the config file to get primer3-settings
+    # create configparser object
     config = configparser.ConfigParser()
-    config.read(CONFIG_NAME)
-    logging.info('Successfully read config {}'.format(CONFIG_NAME))
-
-    # length of the insert between the primer pair
-    product_size_range = None
-    # are there any settings for primer3?
-    if config.has_section('primer3'):
-        primer3_conf = config['primer3']
-        logging.info('Found settings for primer3')
-        logging.debug(
-            'primer3-settings: {}'.format(' '.join(primer3_conf.keys())))
-        if 'primer_product_size_range' in primer3_conf.keys():
-            product_size_range = primer3_conf['primer_product_size_range']
-
+    # check whether path to configfile is a valid one
+    if os.path.isfile(runtime_parameters['config']):
+        # either default value or the one set per cmd argument is valid
+        config.read(args.config)
+        logging.info(
+            'Read config from file: {}'.format(runtime_parameters['config']))
     else:
-        primer3_conf = None
-        logging.warning(
-            'Config contains no settings for primer3, '
-            'running primer3 with default settings.')
+        # no config read -> setting object to None
+        config = None
+        logging.info('No config passed to program.')
+    parse_config_and_parameters(args, config)
 
-    seq_included_region = extract_included_region(config['default'])
-
-    """
-    Existing primer pairs specified via -p/--primerfiles will be read and bowtie
-    run against them.
-    """
-    if not args.keep_primer:
-        logging.info('Generating new primer.')
-        if args.additionalFasta is not None:
-            sequences = args.additionalFasta
-            logging.info(
-                'Found additional file for primer generation {}'.format(
-                    sequences.name
-                ))
-            logging.warning(
-                'It is not possible to say whether a match found '
-                'by bowtie is expected or not if an additional file for '
-                'primer generation is passed.')
-        else:
-            sequences = args.FastaFile
-            logging.info(
-                'No additional file with sequences for primer-generation '
-                'specified')
-        """
-        Extract sequence from FASTA file and get exact id of it as well
-        """
-        sequence, seq_id = parse_fasta(sequences, args.sequence)
-        if not sequence:
-            logging.error(
-                "Could not find sequence with given ID-Prefix. Aborting")
-            sys.exit(1)
-        logging.info('Successfully extracted sequence')
-
-        """
-        Generate primer pairs, depending on extracted sequence, primer3
-        configuration and specified region for which primer shall be generated.
-        """
-        primer_dict = generate_primer(sequence, primer3_conf, args.primerfiles,
-                                      seq_included_region)
-    else:
-        logging.info('Trying to parse existing primer from files specified'
-                     ' via -p/--primerfiles')
-        logging.warning('Calculations whether a hit is expected or not '
-                        'are based on the settings which would be used for '
-                        'normal primer generation: SEQUENCE_INCLUDED_* for '
-                        'the region, PRIMER_PRODUCT_SIZE_RANGE for size of '
-                        'a possible insert and -s/--sequence for prefix-'
-                        'matching with the reported id by bowtie in which '
-                        'sequence the hit was found.')
-        # store given sequence-parameter for prefix-matching with bowtie-results
-        if args.sequence is not None:
-            seq_id = args.sequence
-        else:
-            seq_id = None
-
-        primer_dict = parse_existing_primer(args.primerfiles)
-        # we did not generate any primer, therefore we do not have any sequence
-        # id to check whether a match is expected or not
-    # is an already existing bowtie-index specified?
-    if not args.index:
-        # no index available, so we have to create our own one
-        bowtie_index = setup_bowtie(args.FastaFile,
-                                    args.loglevel == logging.DEBUG, args.bowtie)
-        logging.info("No existing index for bowtie specified")
-    else:
-        bowtie_index = args.index
-        logging.info("Using existing bowtie-index")
-
-    bowtie_result = run_bowtie(bowtie_index, args.primerfiles, args.bowtie,
-                               args.loglevel == logging.WARNING,
-                               product_size_range, args.bowtie_output)
+    # # length of the insert between the primer pair
+    # product_size_range = None
+    # # are there any settings for primer3?
+    # if config.has_section('primer3'):
+    #     primer3_conf = config['primer3']
+    #     logging.info('Found settings for primer3')
+    #     logging.debug(
+    #         'primer3-settings: {}'.format(' '.join(primer3_conf.keys())))
+    #     if 'primer_product_size_range' in primer3_conf.keys():
+    #         product_size_range = primer3_conf['primer_product_size_range']
+    #
+    # else:
+    #     primer3_conf = None
+    #     logging.warning(
+    #         'Config contains no settings for primer3, '
+    #         'running primer3 with default settings.')
+    #
+    # seq_included_region = extract_included_region(config['default'])
+    #
+    # """
+    # Existing primer pairs specified via -p/--primerfiles will be read and bowtie
+    # run against them.
+    # """
+    # if not args.keep_primer:
+    #     logging.info('Generating new primer.')
+    #     if args.additionalFasta is not None:
+    #         sequences = args.additionalFasta
+    #         logging.info(
+    #             'Found additional file for primer generation {}'.format(
+    #                 sequences.name
+    #             ))
+    #         logging.warning(
+    #             'It is not possible to say whether a match found '
+    #             'by bowtie is expected or not if an additional file for '
+    #             'primer generation is passed.')
+    #     else:
+    #         sequences = args.FastaFile
+    #         logging.info(
+    #             'No additional file with sequences for primer-generation '
+    #             'specified')
+    #     """
+    #     Extract sequence from FASTA file and get exact id of it as well
+    #     """
+    #     sequence, seq_id = parse_fasta(sequences, args.sequence)
+    #     if not sequence:
+    #         logging.error(
+    #             "Could not find sequence with given ID-Prefix. Aborting")
+    #         sys.exit(1)
+    #     logging.info('Successfully extracted sequence')
+    #
+    #     """
+    #     Generate primer pairs, depending on extracted sequence, primer3
+    #     configuration and specified region for which primer shall be generated.
+    #     """
+    #     primer_dict = generate_primer(sequence, primer3_conf, args.primerfiles,
+    #                                   seq_included_region)
+    # else:
+    #     logging.info('Trying to parse existing primer from files specified'
+    #                  ' via -p/--primerfiles')
+    #     logging.warning('Calculations whether a hit is expected or not '
+    #                     'are based on the settings which would be used for '
+    #                     'normal primer generation: SEQUENCE_INCLUDED_* for '
+    #                     'the region, PRIMER_PRODUCT_SIZE_RANGE for size of '
+    #                     'a possible insert and -s/--sequence for prefix-'
+    #                     'matching with the reported id by bowtie in which '
+    #                     'sequence the hit was found.')
+    #     # store given sequence-parameter for prefix-matching with bowtie-results
+    #     if args.sequence is not None:
+    #         seq_id = args.sequence
+    #     else:
+    #         seq_id = None
+    #
+    #     primer_dict = parse_existing_primer(args.primerfiles)
+    #     # we did not generate any primer, therefore we do not have any sequence
+    #     # id to check whether a match is expected or not
+    # # is an already existing bowtie-index specified?
+    # if not args.index:
+    #     # no index available, so we have to create our own one
+    #     bowtie_index = setup_bowtie(args.FastaFile,
+    #                                 args.loglevel == logging.DEBUG, args.bowtie)
+    #     logging.info("No existing index for bowtie specified")
+    # else:
+    #     bowtie_index = args.index
+    #     logging.info("Using existing bowtie-index")
+    #
+    # bowtie_result = run_bowtie(bowtie_index, args.primerfiles, args.bowtie,
+    #                            args.loglevel == logging.WARNING,
+    #                            product_size_range, args.bowtie_output)
 
     # create empty list for results
-    results = {}
-    for primer_tuple in bowtie_result:
-        current_key, res = parse_bowtie_result(primer_tuple, config['default'],
-                                               primer_dict, seq_included_region,
-                                               args.additionalFasta is not None,
-                                               seq_id, args.keep_primer)
-        if res is not None:
-            results.setdefault(current_key, []).append(res)
-        else:
-            continue
-
-    # get value defined in config or fallback otherwise
-    max_number_matches = config['default'].getint('MAX_NUMBER_OF_MATCHES',
-                                                  MAX_NUMBER_OF_MATCHES)
-    logging.info('Maximal number of allowed matches set to {}'.format(
-        max_number_matches))
-
-    # set output either to STDOUT or output file if specified by user
-    if args.output is None:
-        logging.info('No file for output specified, writing to STDOUT.')
-        output = sys.stdout
-    else:
-        logging.info('Output file specified, writing results to {}'.format(
-            args.output.name))
-        output = args.output
-
-    # store intermediate all results which would be printed in output
-    printable_res = []
-    for key in sorted(results.keys()):
-        matches = results[key]
-        if len(matches) > max_number_matches:
-            logging.debug(
-                'Not printing results for {} because it has {} matches'.format(
-                    key, len(matches)
-                ))
-        else:
-            # add to intermediate results
-            printable_res.append(matches)
-
-    output.write(RESULT_HEADER + '\n')
-    for matches in sorted(printable_res, key=len):
-        # write results
-        output.write('\n'.join(matches))
-        # final newline at end of results
-        output.write('\n')
+    # results = {}
+    # for primer_tuple in bowtie_result:
+    #     current_key, res = parse_bowtie_result(primer_tuple, config['default'],
+    #                                            primer_dict, seq_included_region,
+    #                                            args.additionalFasta is not None,
+    #                                            seq_id, args.keep_primer)
+    #     if res is not None:
+    #         results.setdefault(current_key, []).append(res)
+    #     else:
+    #         continue
+    #
+    # # get value defined in config or fallback otherwise
+    # max_number_matches = config['default'].getint('MAX_NUMBER_OF_MATCHES',
+    #                                               MAX_NUMBER_OF_MATCHES)
+    # logging.info('Maximal number of allowed matches set to {}'.format(
+    #     max_number_matches))
+    #
+    # # set output either to STDOUT or output file if specified by user
+    # if args.output is None:
+    #     logging.info('No file for output specified, writing to STDOUT.')
+    #     output = sys.stdout
+    # else:
+    #     logging.info('Output file specified, writing results to {}'.format(
+    #         args.output.name))
+    #     output = args.output
+    #
+    # # store intermediate all results which would be printed in output
+    # printable_res = []
+    # for key in sorted(results.keys()):
+    #     matches = results[key]
+    #     if len(matches) > max_number_matches:
+    #         logging.debug(
+    #             'Not printing results for {} because it has {} matches'.format(
+    #                 key, len(matches)
+    #             ))
+    #     else:
+    #         # add to intermediate results
+    #         printable_res.append(matches)
+    #
+    # output.write(RESULT_HEADER + '\n')
+    # for matches in sorted(printable_res, key=len):
+    #     # write results
+    #     output.write('\n'.join(matches))
+    #     # final newline at end of results
+    #     output.write('\n')
 
 
 def parse_existing_primer(prefix: str) -> dict:
@@ -453,23 +475,12 @@ def parse_bowtie_result(primer_tuple: tuple,
     :return tuple of key and result for this key, where the key is the same from
     primer_dict
     """
-    try:
-        last_must_match = int(error_values['last_must_match'])
-        last_to_check = int(error_values['last_to_check'])
-        last_max_error = int(error_values['last_max_error'])
-    except ValueError:
-        logging.error(
-            ('One settings of {} from the config '
-             'could not be parsed as integer. Aborting').format(
-                ', '.join(MANDATORY_VALUES)
-            ))
-        sys.exit(1)
 
     def is_significant(values):
         # if last entry is a number it represents the number of matches at
         # the end of the primer; must not be lower than given value
         if values[-1].isdigit():
-            if int(values[-1]) < last_must_match:
+            if int(values[-1]) < bowtie_parse_options['LAST_MUST_MATCH']:
                 logging.debug(
                     'Failed because last_must_match not fulfilled: {}'.format(
                         values))
@@ -479,7 +490,8 @@ def parse_bowtie_result(primer_tuple: tuple,
                 return True
         # if last entry is a char there is no match, unless we do not care about
         # the entries at the end
-        elif values[-1].isalpha() and last_must_match != 0:
+        elif values[-1].isalpha() and bowtie_parse_options[
+            'LAST_MUST_MATCH'] != 0:
             logging.debug(
                 'Failed because last char is str, '
                 'therefore last n bases cannot match: {}'.format(values))
@@ -494,7 +506,7 @@ def parse_bowtie_result(primer_tuple: tuple,
         # how many bases, when expanding numeral values are already processed
         bases_processed = 0
         # can we stop checking?
-        while bases_processed <= last_to_check:
+        while bases_processed <= bowtie_parse_options['LAST_TO_CHECK']:
             current = values[-i]
             if current.isdigit():
                 bases_processed += int(current)
@@ -502,15 +514,17 @@ def parse_bowtie_result(primer_tuple: tuple,
                 number_of_subs += 1
                 bases_processed += 1
             i += 1
-        if number_of_subs < last_max_error:
+        if number_of_subs < bowtie_parse_options['LAST_MAX_ERROR']:
             return True
         else:
             logging.debug(
                 'Failed because of {num} subs in last {last} '
                 'bases, {max} allowed'.format(
-                    num=number_of_subs, last=last_to_check, max=last_max_error
+                    num=number_of_subs,
+                    last=bowtie_parse_options['LAST_TO_CHECK'],
+                    max=bowtie_parse_options['LAST_MAX_ERROR']
                 ))
-        return number_of_subs < last_max_error
+        return number_of_subs < bowtie_parse_options['LAST_MAX_ERROR']
 
     # if bowtie result line is so short it means no hit has been found
     # and obviously a non existent match cannot be significant
@@ -809,7 +823,7 @@ def parse_arguments() -> argparse.Namespace:
         """, formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
-        "FastaFile", type=argparse.FileType('r'), metavar='path_to_file',
+        "FastaFile", type=argparse.FileType('r'), metavar='path_to_fasta_file',
         help="File containing the sequences in FASTA-Format"
     )
     parser.add_argument(
@@ -819,35 +833,38 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         '-c', '--config', type=str,
-        default=config_name, help="""Configfile with various parameters. Has to
+        default=runtime_parameters['config'], help="""Configfile with various parameters. Has to
         include a '[default]'-section at top of the file, otherwise it can
-        not be parsed.""", metavar='path_to_config'
+        not be parsed.""", metavar='path_to_config',
+        action=args_store_values('config')
     )
     parser.add_argument(
         "-a", "--additionalFasta", type=argparse.FileType('r'),
         default=None, metavar='path_to_file',
         help="""An additional file containing the sequence for which primer
         shall be generated. First sequence inside of the file is taken if
-        not specified otherwise via '-s'."""
+        not specified otherwise via '-s'.""",
+        action=args_store_values('additional_fasta')
     )
     parser.add_argument(
-        '--size', type=int, nargs=2, metavar=('min_size, ', 'max_size'),
+        '--size', type=int, nargs=2, metavar=('min_size', 'max_size'),
         help="Size range of the product including primers."
     )
     parser.add_argument(
-        '--pos', type=int, nargs=2, metavar=('begin, ', 'end'),
+        '--pos', type=int, nargs=2, metavar=('begin', 'end'),
         help="Region between the primer which is not overlapped by them."
     )
     parser.add_argument(
-        '-i', '--index', type=str, default=bowtie_index + '/{FastaFile}', help="""
+        '-i', '--index', type=str, action=args_store_values('index'),
+        default=runtime_parameters['index'] + '/{FastaFile}', help="""
         If no bowtie-index is specified or found a new one will be generated
         for FastaFile. This option is directly forwarded to bowtie."""
     )
     parser.add_argument(
         '-o', '--output', type=argparse.FileType('w'), nargs='?',
-        default=sys.stdout, help="""Output where the results should be stored.
+        default=runtime_parameters['output'], help="""Output where the results should be stored.
         Default is standard output. Results are written as comma separated
-        values (.csv)."""
+        values (.csv).""", action=args_store_values('output')
     )
     parser.add_argument(
         "--keep-primer", dest='keep_primer', action='store_true',
@@ -866,7 +883,8 @@ def parse_arguments() -> argparse.Namespace:
         default=bowtie_parse_options['LAST_TO_CHECK']
     )
     parser.add_argument(
-        '--last-max-error', dest='LAST_MAX_ERROR', type=int,
+        '--last-max-error', dest='LAST_MAX_ERROR', type=int, action='store_const',
+        const=-1,
         help="Maximum number of mismatches allowed to occur in the last "
              "LAST_TO_CHECK bases of a primer to consider it a hit.",
         default=bowtie_parse_options['LAST_MAX_ERROR']
@@ -879,15 +897,16 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         '--primer3', nargs=2, action='append',
-        metavar=('primer3_option, ', 'value'), help="""Append any custom options
+        metavar=('primer3_option', 'value'), help="""Append any custom options
         for primer3 where value is a number, with or without floating point."""
     )
     parser.add_argument(
-        "-p", "--primerfiles", type=str, default="primer3", help="""
+        "-p", "--primerfiles", type=str, default=runtime_parameters['prefix'],
+        help="""
         Prefix for the files where the primer pairs will be written to,
         if new ones are generated, or location of existing ones
         (see --keep-primer) with suffixes '_left.fas' and '_right.fas'.""",
-        metavar='prefix'
+        metavar='prefix', action=args_store_values('prefix')
     )
     parser.add_argument(
         '-v', '--verbose',
@@ -902,17 +921,19 @@ def parse_arguments() -> argparse.Namespace:
         default='WARNING',
     )
     parser.add_argument(
-        "--show-bowtie", dest='bowtie_output', action='store_true',
+        "--show-bowtie", dest='show_bowtie_output', action='store_true',
         help="""Set this option to show the original results of bowtie, written
         to standard error output."""
     )
     parser.add_argument(
         "--bowtie", type=str,
-        default="bowtie", metavar='path_to_bowtie_executable',
+        default=runtime_parameters['bowtie'],
+        action=args_store_values('bowtie'),
+        metavar='path_to_bowtie_executable',
         help="""The bowtie executable if not in PATH. If needed bowtie-build
         is expected to be found via appending '-build' to bowtie."""
     )
-    parser.set_defaults(keep_primer=False, bowtie_output=False)
+    parser.set_defaults(keep_primer=False, show_bowtie_output=False)
     return parser.parse_args()
 
 
