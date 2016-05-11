@@ -195,6 +195,10 @@ def parse_config_and_parameters(args: argparse.Namespace,
     logging.debug('Final parameter for primer3: {}'.format(primer3_options))
 
 
+def validate_options(region_keys: dict, insert_size: tuple, insert_pos: tuple,
+                     parse_options: dict, runtime_params: dict) -> bool:
+    pass
+
 
 def main():
     """
@@ -221,6 +225,8 @@ def main():
         config = None
         logging.info('No config passed to program.')
     parse_config_and_parameters(args, config)
+
+
 
     # # length of the insert between the primer pair
     # product_size_range = None

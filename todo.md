@@ -1,2 +1,1 @@
-* genaues Zusammenspiel von INCLUDED/EXLUDED_REGION --pos und --size klären!
-* fix, dass default werte aus argparser eventuell config ueberschreiben!
+* Strings an Anfang von Datei verschieben, saubererer Code!
