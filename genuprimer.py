@@ -48,6 +48,86 @@ runtime_parameters = {'fasta_file': None,
                       'show_bowtie_output': False}
 
 
+def default_string(key: str, dicts: dict) -> str:
+    """
+    This function generates a string for a help message of a command line
+    argument showing the default value.
+    :param dicts: Dictionary containing the default value.
+    :param key: Key for the dictionary for the default value.
+    :return: Formatted message ready o
+    """
+    return " (default: " + str(dicts[key]) + ")"
+
+
+# messages used for the argparse module, e.g. description or help messages
+arg_description = """
+        genuprimer is able to generate new primer by calling primer3 and
+        afterwards validate their uniqueness among other sequences by calling
+        bowtie. The same can be accomplished for already existing primer pairs.
+        """
+arg_fasta_file_help = "File containing the sequences in FASTA-Format" + \
+                      default_string('fasta_file', runtime_parameters)
+
+arg_sequence_help = """Partial ID of the sequence for which the primer
+        shall be or have been generated."""
+
+arg_config_help = """Configfile with various parameters. Has to
+        include a '[default]'-section at top of the file, otherwise it can
+        not be parsed.""" + default_string('config', runtime_parameters)
+
+arg_additional_fasta_help = """An additional file containing the sequence for which primer
+        shall be generated. First sequence inside of the file is taken if
+        not specified otherwise via '-s'.""",
+
+arg_size_help = "Size range of the product including primers."
+
+arg_pos_help = "Region between the primer which is not overlapped by them."
+
+arg_index_help = """If no bowtie-index is specified or found a new one will be generated
+        for FastaFile. This option is directly forwarded to bowtie.""" + \
+                 ' (default: ' + runtime_parameters['index'] + '/{FastaFile})'
+
+arg_output_help = """Output where the results should be stored.
+        Default is standard output. Results are written as comma separated
+        values (.csv).""" + ' (default: STDOUT)'
+
+arg_keep_primer_help = """Set this option to start another run with the same primers from
+        last run or some custom ones."""
+
+arg_last_must_match_help = """How many of the last bases of a primer have to match to consider
+it a hit?""" + default_string('LAST_MUST_MATCH',
+                              bowtie_parse_options)
+
+arg_last_to_check_help = """How many of the last bases of a primer should be checked
+             considering LAST_MAX_ERROR.""" + \
+                         default_string('LAST_TO_CHECK', bowtie_parse_options)
+
+arg_last_max_error_help = """Maximum number of mismatches allowed to occur in the last
+             LAST_TO_CHECK bases of a primer to consider it a hit.""" + \
+                          default_string('LAST_MAX_ERROR', bowtie_parse_options)
+
+arg_limit_number_of_matches_help = """Maximum number of hits of a primer pair before it is
+             omitted from the results.""" + \
+                                   default_string('LIMIT_NUMBER_OF_MATCHES',
+                                                  bowtie_parse_options)
+
+arg_primer3_help = """Append any custom options
+        for primer3 in a valid format for primer3-py. Options provided this way
+        take precedence over values from configfile."""
+
+arg_primerfiles_help = """Prefix for the files where the
+        primer pairs will be written to, if new ones are generated, or location
+        of existing ones (see --keep-primer) with suffixes '_left.fas'
+        and '_right.fas'.""" + default_string('prefix', runtime_parameters)
+
+arg_show_bowtie_output_help = """Set this option to show the original results
+        of bowtie, written to standard error output."""
+
+arg_bowtie_help = """The bowtie executable if not in PATH. If needed bowtie-build
+        is expected to be found via appending '-build' to bowtie.""" + \
+                  default_string('bowtie', runtime_parameters)
+
+
 def setup_logging(loglevel: str):
     """
     Setups the logging functionality, sets colors for different log levels
@@ -862,132 +942,89 @@ def generate_primer(sequence: str, primer3_config: configparser.SectionProxy,
     return primer_dict
 
 
-def default_string(key: str, dicts: dict) -> str:
-    return " (default: " + str(dicts[key]) + ")"
-
-
 def parse_arguments() -> argparse.Namespace:
     """
     This function parses the commandline arguments via the argparse-module,
     which additionally generates a help-hook, if a parameter is passed wrong.
     :return: A parser-object containing all parsed values.
     """
-    parser = argparse.ArgumentParser(
-        description="""
-        genuprimer is able to generate new primer by calling primer3 and
-        afterwards validate their uniqueness among other sequences by calling
-        bowtie. The same can be accomplished for already existing primer pairs.
-        """
-    )
+    parser = argparse.ArgumentParser(description=arg_description)
+
     parser.add_argument(
         "fasta_file", type=argparse.FileType('r'), metavar='path_to_fasta_file',
-        help="File containing the sequences in FASTA-Format" + default_string(
-            'fasta_file', runtime_parameters)
+        help=arg_fasta_file_help
     )
     parser.add_argument(
         "-s", "--sequence", type=str, metavar='prefix_of_seq_id',
-        help="""Partial ID of the sequence for which the primer
-        shall be or have been generated.""", dest='seq_id'
+        help=arg_sequence_help, dest='seq_id'
     )
     parser.add_argument(
-        '-c', '--config', type=str,
-        help="""Configfile with various parameters. Has to
-        include a '[default]'-section at top of the file, otherwise it can
-        not be parsed.""" + default_string('config', runtime_parameters),
+        '-c', '--config', type=str, help=arg_config_help,
         metavar='path_to_config',
     )
     parser.add_argument(
         "-a", "--additionalFasta", type=argparse.FileType('r'),
         metavar='path_to_file', dest='additional_fasta',
-        help="""An additional file containing the sequence for which primer
-        shall be generated. First sequence inside of the file is taken if
-        not specified otherwise via '-s'.""",
+        help=arg_additional_fasta_help
     )
     parser.add_argument(
         '--size', type=int, nargs=2, metavar=('min_size', 'max_size'),
-        help="Size range of the product including primers."
+        help=arg_size_help
     )
     parser.add_argument(
         '--pos', type=int, nargs=2, metavar=('begin', 'end'),
-        help="Region between the primer which is not overlapped by them."
+        help=arg_pos_help
     )
     parser.add_argument(
-        '-i', '--index', type=str,
-        help="""If no bowtie-index is specified or found a new one will be generated
-        for FastaFile. This option is directly forwarded to bowtie.""" +
-             ' (default: ' + runtime_parameters['index'] + '/{FastaFile})',
+        '-i', '--index', type=str, help=arg_index_help,
     )
     parser.add_argument(
         '-o', '--output', type=argparse.FileType('w'), nargs='?',
-        help="""Output where the results should be stored.
-        Default is standard output. Results are written as comma separated
-        values (.csv).""" + ' (default: STDOUT)'
+        help=arg_output_help
     )
     parser.add_argument(
         "--keep-primer", dest='keep_primer', action='store_true',
-        help="""Set this option to start another run with the same primers from
-        last run or some custom ones."""
+        help=arg_keep_primer_help
     )
     parser.add_argument(
         '--last-must-match', dest='LAST_MUST_MATCH', type=int,
-        help="How many of the last bases of a primer have to match to consider "
-             "it a hit?" + default_string('LAST_MUST_MATCH',
-                                          bowtie_parse_options)
+        help=arg_last_must_match_help
     )
     parser.add_argument(
         '--last-to-check', dest='LAST_TO_CHECK', type=int,
-        help="How many of the last bases of a primer should be checked "
-             "considering LAST_MAX_ERROR." +
-             default_string('LAST_TO_CHECK', bowtie_parse_options)
+        help=arg_last_to_check_help
     )
     parser.add_argument(
         '--last-max-error', dest='LAST_MAX_ERROR', type=int,
-        help="Maximum number of mismatches allowed to occur in the last "
-             "LAST_TO_CHECK bases of a primer to consider it a hit." +
-             default_string('LAST_MAX_ERROR', bowtie_parse_options)
+        help=arg_last_max_error_help
     )
     parser.add_argument(
         '-l', '--limit-number-of-matches', dest='LIMIT_NUMBER_OF_MATCHES',
-        help="Maximum number of hits of a primer pair before it is "
-             "omitted from the results." +
-             default_string(
-                 'LIMIT_NUMBER_OF_MATCHES', bowtie_parse_options), type=int,
+        type=int, help=arg_limit_number_of_matches_help
     )
     parser.add_argument(
         '--primer3', nargs=2, action='append',
-        metavar=('primer3_option', 'value'), help="""Append any custom options
-        for primer3 in a valid format for primer3-py. Options provided this way
-        take precedence over values from configfile."""
+        metavar=('primer3_option', 'value'), help=arg_primer3_help
     )
     parser.add_argument(
-        "-p", "--primerfiles", type=str, help="""Prefix for the files where the
-        primer pairs will be written to, if new ones are generated, or location
-        of existing ones (see --keep-primer) with suffixes '_left.fas'
-        and '_right.fas'.""" + default_string('prefix', runtime_parameters),
+        "-p", "--primerfiles", type=str, help=arg_primerfiles_help,
         metavar='prefix',
     )
     parser.add_argument(
-        '-v', '--verbose',
-        help="Be verbose by showing INFO messages.",
-        action="store_const", dest="loglevel", const='INFO',
-        default='WARNING',
+        '-v', '--verbose', help="Be verbose by showing INFO messages.",
+        action="store_const", dest="loglevel", const='INFO', default='WARNING',
     )
     parser.add_argument(
-        '-d', '--debug',
-        help="Print lots of DEBUG messages.",
-        action="store_const", dest="loglevel", const='DEBUG',
-        default='WARNING',
+        '-d', '--debug', help="Print lots of DEBUG messages.",
+        action="store_const", dest="loglevel", const='DEBUG', default='WARNING',
     )
     parser.add_argument(
         "--show-bowtie", dest='show_bowtie_output', action='store_true',
-        help="""Set this option to show the original results of bowtie, written
-        to standard error output."""
+        help=arg_show_bowtie_output_help
     )
     parser.add_argument(
         "--bowtie", type=str, metavar='path_to_bowtie_executable',
-        help="""The bowtie executable if not in PATH. If needed bowtie-build
-        is expected to be found via appending '-build' to bowtie.""" +
-             default_string('bowtie', runtime_parameters)
+        help=arg_bowtie_help
     )
     parser.set_defaults(keep_primer=False, show_bowtie_output=False)
     return parser.parse_args()
