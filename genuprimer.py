@@ -127,6 +127,18 @@ arg_bowtie_help = """The bowtie executable if not in PATH. If needed bowtie-buil
         is expected to be found via appending '-build' to bowtie.""" + \
                   default_string('bowtie', runtime_parameters)
 
+found_config_msg = 'Found [{conf}]-config in configfile'
+
+key_is_not_a_number_msg = 'Key {k} in [{conf}]-config is not a number'
+
+new_value_for_key_msg = 'New value for {k}: {v}'
+
+eval_primer3_key_msg = 'Evaluated {key} to {v}: {t}'
+
+invalid_key_msg = ('Could not parse option {key} with value {v} '
+                   'from {source}.'
+                   'Ignoring value')
+
 
 def setup_logging(loglevel: str):
     """
@@ -164,14 +176,10 @@ def parse_config_and_parameters(args: argparse.Namespace,
     if config:
         logging.info('Parsing configfile')
         if config.has_section('default'):
-            logging.info('Found [default]-config in configfile')
+            logging.info(found_config_msg.format(conf='default'))
             section = config['default']  # type: configparser.SectionProxy
             for key in section:  # type: str
                 if key.upper() in bowtie_parse_options.keys():
-                    logging.debug(('Found key {k} with value {v} in '
-                                   '[default]-config').format(
-                        k=key.upper(), v=section[key])
-                    )
                     # get key from config and if it fails during conversion
                     # to an integer use the default value
                     try:
@@ -181,49 +189,42 @@ def parse_config_and_parameters(args: argparse.Namespace,
                     except ValueError:
                         # value is not a number, use fallback value
                         value = bowtie_parse_options[key.upper()]
-                        logging.warning(
-                            'Key {k} in [default]-config is not a number'.format(
-                                k=key.upper()
-                            ))
+                        logging.warning(key_is_not_a_number_msg.format(
+                            k=key.upper(), conf='default'
+                        ))
                     bowtie_parse_options[key.upper()] = value
-                    logging.debug('New value for {k}: {v}'.format(
+                    logging.debug(new_value_for_key_msg.format(
                         k=key.upper(), v=value))
 
                 if key.upper() in CONFIG_REGION_KEYS.keys():
-                    logging.debug(('Found key {k} with value {v} in '
-                                   '[default]-config').format(
-                        k=key.upper(), v=section[key])
-                    )
                     # get key from config and if it fails during conversion
                     # to an integer use the default value
                     try:
                         value = section.getint(key.upper(), -1)
                     except ValueError:
                         value = CONFIG_REGION_KEYS[key.upper()]
-                        logging.warning(
-                            'Key {k} in [default]-config is not a number'.format(
-                                k=key.upper()
-                            ))
+                        logging.warning(key_is_not_a_number_msg.format(
+                            k=key.upper(), conf='default'
+                        ))
                     CONFIG_REGION_KEYS[key.upper()] = value
-                    logging.debug('New value for {k}: {v}'.format(
+                    logging.debug(new_value_for_key_msg.format(
                         k=key.upper(), v=value
                     ))
         if config.has_section('primer3'):
-            logging.info('Found [primer3]-config in configfile')
+            logging.info(found_config_msg.format(conf='primer3'))
             section = config['primer3']
             # if yes, we have to parse them
             for k in section.keys():
                 try:
                     value = ast.literal_eval(section[k])
-                    logging.debug('Evaluated {key} to {v}: {t}'.format(
+                    logging.debug(eval_primer3_key_msg.format(
                         key=k, v=value, t=type(value)
                     ))
                     primer3_options.update({str(k).upper(): value})
                 except (SyntaxError, ValueError):
                     logging.warning(
-                        ('Could not parse option {key} with value {v} '
-                         'from [primer3] section.'
-                         'Ignoring value').format(key=k, v=section[k])
+                        invalid_key_msg.format(key=k, v=section[k],
+                                               source='[primer3]-config')
                     )
         logging.info('Finished parsing of configfile')
         logging.debug('Current config values: {}'.format(
@@ -242,19 +243,19 @@ def parse_config_and_parameters(args: argparse.Namespace,
     if args['size']:
         global primer3_insert_size
         primer3_insert_size = tuple(args['size'])
-        logging.debug('New value for PRIMER_PRODUCT_SIZE: {v}'.format(
-            v=primer3_insert_size
+        logging.debug(new_value_for_key_msg.format(
+            v=primer3_insert_size, k='PRIMER_PRODUCT_SIZE'
         ))
     if args['pos']:
         global primer3_insert_pos
         primer3_insert_pos = tuple(args['pos'])
-        logging.debug('New value for PRIMER_INSERT_POSITION: {v}'.format(
-            v=primer3_insert_pos
+        logging.debug(new_value_for_key_msg.format(
+            v=primer3_insert_pos, k='PRIMER_INSERT_POSITION'
         ))
     for key in runtime_parameters:
         if key in args.keys() and args[key]:
             runtime_parameters[key] = args[key]
-            logging.debug('New value for {k}: {v}'.format(
+            logging.debug(new_value_for_key_msg.format(
                 k=key, v=runtime_parameters[key]
             ))
     if args['primer3']:
@@ -262,15 +263,14 @@ def parse_config_and_parameters(args: argparse.Namespace,
         for option, value in args['primer3']:
             try:
                 value = ast.literal_eval(value)
-                logging.debug('Evaluated {key} to {v}: {t}'.format(
+                logging.debug(eval_primer3_key_msg.format(
                     key=option, v=value, t=type(value)
                 ))
                 primer3_options.update({option: value})
             except (SyntaxError, ValueError):
                 logging.warning(
-                    ('Could not parse option {key} with value {v} '
-                     'from commandline.'
-                     'Ignoring value').format(key=option, v=value)
+                    invalid_key_msg.format(key=option, v=value,
+                                           source='commandline')
                 )
     logging.debug('Final parameter for primer3: {}'.format(primer3_options))
 
