@@ -33,6 +33,8 @@ bowtie_parse_options = {'LAST_MUST_MATCH': 3,
 
 primer3_options = {}  # type: dict
 
+sequence_included_region = ()
+
 # various runtime parameters and their default values
 runtime_parameters = {'fasta_file': None,
                       'seq_id': '',
@@ -404,69 +406,62 @@ def main():
                         'matching with the reported id by bowtie in which '
                         'sequence the hit was found.')
 
-        # primer_dict = parse_existing_primer(args.primerfiles)
-        # we did not generate any primer, therefore we do not have any sequence
-        # id to check whether a match is expected or not
-        # # is an already existing bowtie-index specified?
-        # if not args.index:
-        #     # no index available, so we have to create our own one
-        #     bowtie_index = setup_bowtie(args.FastaFile,
-        #                                 args.loglevel == logging.DEBUG, args.bowtie)
-        #     logging.info("No existing index for bowtie specified")
-        # else:
-        #     bowtie_index = args.index
-        #     logging.info("Using existing bowtie-index")
-        #
-        # bowtie_result = run_bowtie(bowtie_index, args.primerfiles, args.bowtie,
-        #                            args.loglevel == logging.WARNING,
-        #                            product_size_range, args.bowtie_output)
+        primer_dict = parse_existing_primer(runtime_parameters['prefix'])
+    # is an already existing bowtie-index specified?
+    if not runtime_parameters['index']:
+        # no index available, so we have to create our own one
+        runtime_parameters['index'] = default_bowtie_index_location(
+            runtime_parameters['fasta_file'].name)
+        setup_bowtie(runtime_parameters['index'],
+                     runtime_parameters['fasta_file'].name,
+                     args.loglevel == logging.DEBUG,
+                     runtime_parameters['bowtie'])
+        logging.info("No existing index for bowtie specified")
+    else:
+        logging.info("Using existing bowtie-index")
 
-        # create empty list for results
-        # results = {}
-        # for primer_tuple in bowtie_result:
-        #     current_key, res = parse_bowtie_result(primer_tuple, config['default'],
-        #                                            primer_dict, seq_included_region,
-        #                                            args.additionalFasta is not None,
-        #                                            seq_id, args.keep_primer)
-        #     if res is not None:
-        #         results.setdefault(current_key, []).append(res)
-        #     else:
-        #         continue
-        #
-        # # get value defined in config or fallback otherwise
-        # max_number_matches = config['default'].getint('MAX_NUMBER_OF_MATCHES',
-        #                                               MAX_NUMBER_OF_MATCHES)
-        # logging.info('Maximal number of allowed matches set to {}'.format(
-        #     max_number_matches))
-        #
-        # # set output either to STDOUT or output file if specified by user
-        # if args.output is None:
-        #     logging.info('No file for output specified, writing to STDOUT.')
-        #     output = sys.stdout
-        # else:
-        #     logging.info('Output file specified, writing results to {}'.format(
-        #         args.output.name))
-        #     output = args.output
-        #
-        # # store intermediate all results which would be printed in output
-        # printable_res = []
-        # for key in sorted(results.keys()):
-        #     matches = results[key]
-        #     if len(matches) > max_number_matches:
-        #         logging.debug(
-        #             'Not printing results for {} because it has {} matches'.format(
-        #                 key, len(matches)
-        #             ))
-        #     else:
-        #         # add to intermediate results
-        #         printable_res.append(matches)
-        #
-        # output.write(RESULT_HEADER + '\n')
-        # for matches in sorted(printable_res, key=len):
-        #     # write results
-        #     output.write('\n'.join(matches))
-        #     # final newline at end of results
-        #     output.write('\n')
+    bowtie_result = run_bowtie(runtime_parameters['index'],
+                               runtime_parameters['prefix'],
+                               runtime_parameters['bowtie'],
+                               args.loglevel == logging.WARNING,
+                               primer3_product_size,
+                               runtime_parameters['show_bowtie_output'])
+
+    # create empty list for results
+    results = {}
+    for primer_tuple in bowtie_result:
+        current_key, res = parse_bowtie_result(
+            primer_tuple,
+            primer_dict,
+            sequence_included_region,
+            runtime_parameters['additional_fasta'] is not None,
+            runtime_parameters['seq_id'],
+            runtime_parameters['keep_primer'])
+        if res is not None:
+            results.setdefault(current_key, []).append(res)
+        else:
+            continue
+
+    output = runtime_parameters['output']
+    # store intermediate all results which would be printed in output
+    printable_res = []
+    for key in sorted(results.keys()):
+        matches = results[key]
+        if len(matches) > bowtie_parse_options['LIMIT_NUMBER_OF_MATCHES']:
+            logging.debug(
+                'Not printing results for {} because it has {} matches'.format(
+                    key, len(matches)
+                ))
+        else:
+            # add to intermediate results
+            printable_res.append(matches)
+
+    output.write(RESULT_HEADER + '\n')
+    for matches in sorted(printable_res, key=len):
+        # write results
+        output.write('\n'.join(matches))
+        # final newline at end of results
+        output.write('\n')
 
 
 def parse_existing_primer(prefix: str) -> dict:
@@ -604,7 +599,6 @@ def extract_included_region(config: configparser.SectionProxy) -> tuple:
 
 
 def parse_bowtie_result(primer_tuple: tuple,
-                        error_values: configparser.SectionProxy,
                         primer_dict: dict,
                         seq_included_region: tuple, additional_fasta: bool,
                         seq_id: str,
@@ -792,8 +786,8 @@ def default_bowtie_index_location(fasta_file_name: str) -> str:
     return bowtie_index
 
 
-def setup_bowtie(fasta_file: '_io.TextIOWrapper', debug: bool,
-                 bowtie_exec: str) -> str:
+def setup_bowtie(index_location: str, fasta_file_location: str, debug: bool,
+                 bowtie_exec: str):
     """
     If no bowtie-index is specified we have to build it.
     :param fasta_file: io-wrapper of the file with sequences that shall be
@@ -801,20 +795,15 @@ def setup_bowtie(fasta_file: '_io.TextIOWrapper', debug: bool,
     :param debug: whether debug logging is set on or off.
     :param bowtie_exec: str containing the path to bowtie executable.
     bowtie-build is supposed to be in the same folder.
-    :return location of the build index
     """
-    import re
-    bowtie_index_dir = 'bowtie-index'
+    bowtie_index_dir = index_location.split('/')[0]
     # create new directory for the index,
     # no problem if specific folder already exists
     os.makedirs(bowtie_index_dir, exist_ok=True)
     # determine name for index from name of the
     # FASTA-file containing the sequences
-    bowtie_index = "{index_dir}/{prefix}_bowtie".format(
-        index_dir=bowtie_index_dir,
-        prefix=re.split("/|\.", fasta_file.name)[-2])
     bowtie_build = bowtie_exec + '-build'
-    args = [bowtie_build, fasta_file.name, bowtie_index]
+    args = [bowtie_build, fasta_file_location, index_location]
     logging.info('bowtie-build command: {}'.format(args))
     if not debug:
         # We are not in debug-mode so no output will be shown
@@ -823,7 +812,6 @@ def setup_bowtie(fasta_file: '_io.TextIOWrapper', debug: bool,
     else:
         # debug-mode, show everything
         subprocess.call(args)
-    return bowtie_index
 
 
 def run_bowtie(bowtie_index: str, files_prefix: str, bowtie_exec: str,
@@ -847,23 +835,8 @@ def run_bowtie(bowtie_index: str, files_prefix: str, bowtie_exec: str,
     right = "{}_right.fas".format(files_prefix)
     # base for calling bowtie
     args = [bowtie_exec, "-k", "5000", "-S", "-f", bowtie_index, "-1",
-            left, "-2", right, "--sam-nohead"]
-    if size_range is not None:
-        # value is specified, try to parse it as list
-        try:
-            tmp = ast.literal_eval(size_range)
-            if type(tmp) == list and isinstance(tmp[0], int) and isinstance(
-                tmp[1], int):
-                args += ['--minins', str(tmp[0]), '--maxins', str(tmp[1])]
-
-        except (ValueError, SyntaxError):
-            # Same error has already been reported during primer generation
-            pass
-
-        logging.debug(
-            'Product size range was specified for primer3'
-            '. Applying values for bowtie insert size: {}'.format(size_range)
-        )
+            left, "-2", right, "--sam-nohead", '--minins', str(size_range[0]),
+            '--maxins', str(size_range[1])]
     logging.info('Calling bowtie: {}'.format(args))
     if silent:
         args += ['--quiet']
@@ -908,9 +881,14 @@ def generate_primer(sequence: str, primer3_options: dict,
         # leftmost position
         primer3_insert_pos[1] - primer3_product_size[1],
         # leftmost overlap
-        primer3_product_size[1] - (primer3_insert_pos[1] - primer3_insert_pos[0]),
+        primer3_product_size[1] - (
+            primer3_insert_pos[1] - primer3_insert_pos[0]),
         # right primer has to start after insert, end will be determined by product size
-        primer3_insert_pos[1], -1]
+        primer3_insert_pos[1],
+        # rightmost overlap
+        primer3_product_size[1] - (
+            primer3_insert_pos[1] - primer3_insert_pos[0]),
+        ]
 
     primer3_options.update(
         {'PRIMER_PRODUCT_SIZE_RANGE': product_size_range}
@@ -921,14 +899,20 @@ def generate_primer(sequence: str, primer3_options: dict,
     logging.info(
         'Product size: {}'.format(product_size_range)
     )
+    global sequence_included_region
+    sequence_included_region = tuple(
+        [ok_region_list[0],
+         primer3_insert_pos[0] + primer3_product_size[1] - ok_region_list[0]
+         ])
     res = primer3.bindings.designPrimers({
         'SEQUENCE_ID': 'mySequence',
         'SEQUENCE_TEMPLATE': sequence,
         # give start of sequence and length
         'SEQUENCE_PRIMER_PAIR_OK_REGION_LIST': ok_region_list,
-        'SEQUENCE_INCLUDED_REGION': [ok_region_list[0], primer3_insert_pos[0] + primer3_product_size[1] - ok_region_list[0]]
+        'SEQUENCE_INCLUDED_REGION': sequence_included_region
 
     })
+    logging.debug('OK_REGION_LIST for primer3: {}'.format(ok_region_list))
 
     primer_left = {}  # type: dict
     primer_right = {}  # type: dict
