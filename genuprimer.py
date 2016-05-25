@@ -33,6 +33,8 @@ bowtie_parse_options = {'LAST_MUST_MATCH': 3,
 
 primer3_options = {}  # type: dict
 
+primer3_pair_ok_region_list = []
+
 sequence_included_region = ()
 
 # various runtime parameters and their default values
@@ -250,6 +252,26 @@ def parse_config_and_parameters(args: argparse.Namespace,
         logging.debug(new_value_for_key_msg.format(
             v=primer3_insert_pos, k='PRIMER_INSERT_POSITION'
         ))
+    global primer3_pair_ok_region_list
+    primer3_pair_ok_region_list = [
+        # leftmost position
+        primer3_insert_pos[1] - primer3_product_size[1],
+        # leftmost overlap
+        primer3_product_size[1] - (
+            primer3_insert_pos[1] - primer3_insert_pos[0]),
+        # right primer has to start after insert, end will be determined by product size
+        primer3_insert_pos[1],
+        # rightmost overlap
+        primer3_product_size[1] - (
+            primer3_insert_pos[1] - primer3_insert_pos[0]),
+    ]
+    global sequence_included_region
+    sequence_included_region = tuple(
+        # leftmost position
+        [primer3_pair_ok_region_list[0],
+         # rightmost position + rightmost overlap
+         primer3_insert_pos[1] + primer3_pair_ok_region_list[3]
+         ])
     for key in runtime_parameters:
         if key in args.keys() and args[key]:
             runtime_parameters[key] = args[key]
@@ -275,7 +297,7 @@ def parse_config_and_parameters(args: argparse.Namespace,
 
 def validate_options(region_keys: dict, insert_size: tuple, insert_pos: tuple,
                      parse_options: dict, runtime_params: dict,
-                     ) -> bool:
+                     ):
     # check whether we can use an existing bowtie index
     if runtime_parameters['index'] == 'bowtie-index':
         default_index = default_bowtie_index_location(
@@ -322,7 +344,6 @@ def validate_options(region_keys: dict, insert_size: tuple, insert_pos: tuple,
         sys.exit(1)
     logging.debug('Selected Product Size: {}'.format(primer3_product_size))
     logging.debug('Selected Insert Position: {}'.format(primer3_insert_pos))
-    return True
 
 
 def main():
@@ -351,9 +372,9 @@ def main():
         logging.info('No config passed to program.')
     parse_config_and_parameters(args, config)
 
-    valid_options = validate_options(CONFIG_REGION_KEYS, primer3_product_size,
-                                     primer3_insert_pos, bowtie_parse_options,
-                                     runtime_parameters)
+    validate_options(
+        CONFIG_REGION_KEYS, primer3_product_size,
+        primer3_insert_pos, bowtie_parse_options, runtime_parameters)
 
     """
     Existing primer pairs specified via -p/--primerfiles will be read and bowtie
@@ -600,7 +621,8 @@ def extract_included_region(config: configparser.SectionProxy) -> tuple:
 
 def parse_bowtie_result(primer_tuple: tuple,
                         primer_dict: dict,
-                        seq_included_region: tuple, additional_fasta: bool,
+                        seq_included_region: tuple,
+                        additional_fasta: bool,
                         seq_id: str,
                         keep_primer: bool) -> tuple:
     """
@@ -608,8 +630,6 @@ def parse_bowtie_result(primer_tuple: tuple,
     the most important information.
     :param primer_tuple: Current tuple (forward and reverse) which bowtie
     results are now checked.
-    :param error_values: Dictionary containing the values which are necessary
-    to check for valid matches.
     :param primer_dict: Dictionary containing all primer pairs, accessible via
     sorted concatenation of fwd-primer-id and rev-primer-id.
     :param seq_included_region: Start and stop of the region for which the
@@ -632,9 +652,10 @@ def parse_bowtie_result(primer_tuple: tuple,
         # the end of the primer; must not be lower than given value
         if values[-1].isdigit():
             if int(values[-1]) < bowtie_parse_options['LAST_MUST_MATCH']:
-                logging.debug(
-                    'Failed because last_must_match not fulfilled: {}'.format(
-                        values))
+                # only enable line below if you really want to understand process
+                # logging.debug(
+                #     'Failed because last_must_match not fulfilled: {}'.format(
+                #         values))
                 return False
             # only one number at the end and it is greate than last_must_match
             if len(values) == 1:
@@ -643,12 +664,15 @@ def parse_bowtie_result(primer_tuple: tuple,
         # the entries at the end
         elif values[-1].isalpha() and bowtie_parse_options[
             'LAST_MUST_MATCH'] != 0:
-            logging.debug(
-                'Failed because last char is str, '
-                'therefore last n bases cannot match: {}'.format(values))
+            # only enable line below if you really want to understand process
+            # logging.debug(
+            #     'Failed because last char is str, '
+            #     'therefore last n bases cannot match: {}'.format(values))
             return False
 
-        logging.debug('Checking non-trivial: {}'.format(values))
+        # only enable line below if you really want to understand process
+        # logging.debug('Checking non-trivial: {}'.format(values))
+
         # calculate the last entries to check
         # index to iterate over result values
         i = 1
@@ -736,8 +760,10 @@ def parse_bowtie_result(primer_tuple: tuple,
             We therefore look whether the given id is a prefix of the reported
             id.
             """
-            expected_hit = seq_included_region[0] <= int(infos[3]) <= int(
-                infos[7]) <= seq_included_region[1] and infos[2].startswith(
+            expected_hit = seq_included_region[0] <= \
+                           int(infos[3]) <= \
+                           int(infos[7]) <= \
+                           seq_included_region[1] and infos[2].startswith(
                 seq_id)
         else:
             """
@@ -877,19 +903,6 @@ def generate_primer(sequence: str, primer3_options: dict,
 
     product_size_range = list(primer3_product_size)
 
-    ok_region_list = [
-        # leftmost position
-        primer3_insert_pos[1] - primer3_product_size[1],
-        # leftmost overlap
-        primer3_product_size[1] - (
-            primer3_insert_pos[1] - primer3_insert_pos[0]),
-        # right primer has to start after insert, end will be determined by product size
-        primer3_insert_pos[1],
-        # rightmost overlap
-        primer3_product_size[1] - (
-            primer3_insert_pos[1] - primer3_insert_pos[0]),
-        ]
-
     primer3_options.update(
         {'PRIMER_PRODUCT_SIZE_RANGE': product_size_range}
     )
@@ -899,20 +912,18 @@ def generate_primer(sequence: str, primer3_options: dict,
     logging.info(
         'Product size: {}'.format(product_size_range)
     )
-    global sequence_included_region
-    sequence_included_region = tuple(
-        [ok_region_list[0],
-         primer3_insert_pos[0] + primer3_product_size[1] - ok_region_list[0]
-         ])
+    logging.debug(
+        'OK_REGION_LIST for primer3: {}'.format(primer3_pair_ok_region_list))
     res = primer3.bindings.designPrimers({
         'SEQUENCE_ID': 'mySequence',
         'SEQUENCE_TEMPLATE': sequence,
         # give start of sequence and length
-        'SEQUENCE_PRIMER_PAIR_OK_REGION_LIST': ok_region_list,
-        'SEQUENCE_INCLUDED_REGION': sequence_included_region
+        'SEQUENCE_PRIMER_PAIR_OK_REGION_LIST': primer3_pair_ok_region_list,
+        'SEQUENCE_INCLUDED_REGION': [sequence_included_region[0],
+                                     sequence_included_region[1] -
+                                     sequence_included_region[0]]
 
     })
-    logging.debug('OK_REGION_LIST for primer3: {}'.format(ok_region_list))
 
     primer_left = {}  # type: dict
     primer_right = {}  # type: dict
