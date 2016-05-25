@@ -12,8 +12,6 @@ import re
 import subprocess
 import sys
 
-import primer3
-
 # Constants
 RESULT_HEADER = "FWD_ID,REV_ID,MATCH_ID,FWD,REV,START,STOP,LENGTH,EXP"
 LOGGING_LEVEL = {'WARNING': logging.WARNING,
@@ -24,7 +22,7 @@ CONFIG_REGION_KEYS = {'TARGET_POSITION_BEGIN': None,
                       'PRIMER_PRODUCT_SIZE_MIN': None,
                       'PRIMER_PRODUCT_SIZE_MAX': None}
 
-primer3_insert_size = ()  # type: tuple
+primer3_product_size = ()  # type: tuple
 
 primer3_insert_pos = ()  # type: tuple
 
@@ -172,7 +170,7 @@ def setup_logging(loglevel: str):
 def parse_config_and_parameters(args: argparse.Namespace,
                                 config: configparser.ConfigParser):
     # convert args namespace to normal dictionary
-    args = vars(args)
+    args = vars(args)  # type: dict
     if config:
         logging.info('Parsing configfile')
         if config.has_section('default'):
@@ -232,8 +230,6 @@ def parse_config_and_parameters(args: argparse.Namespace,
         ))
 
     logging.info('Parsing commandline arguments')
-    runtime_parameters['show_bowtie_output'] = args['show_bowtie_output']
-    runtime_parameters['keep_primer'] = args['keep_primer']
     for key in bowtie_parse_options:
         if args[key]:
             bowtie_parse_options[key] = args[key]
@@ -241,10 +237,10 @@ def parse_config_and_parameters(args: argparse.Namespace,
                 k=key, v=bowtie_parse_options[key]
             ))
     if args['size']:
-        global primer3_insert_size
-        primer3_insert_size = tuple(args['size'])
+        global primer3_product_size
+        primer3_product_size = tuple(args['size'])
         logging.debug(new_value_for_key_msg.format(
-            v=primer3_insert_size, k='PRIMER_PRODUCT_SIZE'
+            v=primer3_product_size, k='PRIMER_PRODUCT_SIZE'
         ))
     if args['pos']:
         global primer3_insert_pos
@@ -276,8 +272,55 @@ def parse_config_and_parameters(args: argparse.Namespace,
 
 
 def validate_options(region_keys: dict, insert_size: tuple, insert_pos: tuple,
-                     parse_options: dict, runtime_params: dict) -> bool:
-    pass
+                     parse_options: dict, runtime_params: dict,
+                     ) -> bool:
+    # check whether we can use an existing bowtie index
+    if runtime_parameters['index'] == 'bowtie-index':
+        default_index = default_bowtie_index_location(
+            runtime_parameters['fasta_file'].name)
+        logging.debug(
+            'No existing bowtie index specified, looking at default path: {path}'.format(
+                path=default_index))
+        if os.path.isfile(default_index + '.1.ebwt'):
+            logging.info('Found existing bowtie index probably created by us.')
+            runtime_parameters['index'] = default_index
+        else:
+            logging.info('No bowtie index has been passed via command line '
+                         'and no default one could be found. A new one will '
+                         'be generated.')
+            runtime_parameters['index'] = None
+
+    global primer3_product_size
+    global primer3_insert_pos
+    # set insert position and product size
+    if not primer3_product_size:
+        if not CONFIG_REGION_KEYS['PRIMER_PRODUCT_SIZE_MIN'] or not \
+            CONFIG_REGION_KEYS['PRIMER_PRODUCT_SIZE_MAX']:
+            logging.error(
+                'No desired size of the product has been passed. Aborting')
+            sys.exit(1)
+        primer3_product_size = (CONFIG_REGION_KEYS['PRIMER_PRODUCT_SIZE_MIN'],
+                                CONFIG_REGION_KEYS['PRIMER_PRODUCT_SIZE_MAX'])
+    if primer3_product_size[0] >= primer3_product_size[1]:
+        logging.error('Product size range must be positive')
+        sys.exit(1)
+    if not primer3_insert_pos:
+        if not CONFIG_REGION_KEYS['TARGET_POSITION_BEGIN'] or not \
+            CONFIG_REGION_KEYS['TARGET_POSITION_END']:
+            logging.error(
+                'No position of the product has been passed. Aborting')
+            sys.exit(1)
+        primer3_insert_pos = (CONFIG_REGION_KEYS['TARGET_POSITION_BEGIN'],
+                              CONFIG_REGION_KEYS['TARGET_POSITION_END'])
+    if primer3_insert_pos[0] >= primer3_insert_pos[1]:
+        logging.error('Target position range must be positive')
+        sys.exit(1)
+    if primer3_insert_pos[1] - primer3_insert_pos[0] > primer3_product_size[0]:
+        logging.error('Minimal product size must be larger than insert size')
+        sys.exit(1)
+    logging.debug('Selected Product Size: {}'.format(primer3_product_size))
+    logging.debug('Selected Insert Position: {}'.format(primer3_insert_pos))
+    return True
 
 
 def main():
@@ -306,143 +349,124 @@ def main():
         logging.info('No config passed to program.')
     parse_config_and_parameters(args, config)
 
+    valid_options = validate_options(CONFIG_REGION_KEYS, primer3_product_size,
+                                     primer3_insert_pos, bowtie_parse_options,
+                                     runtime_parameters)
 
+    """
+    Existing primer pairs specified via -p/--primerfiles will be read and bowtie
+    run against them.
+    """
+    if not runtime_parameters['keep_primer']:
+        logging.info('Generating new primer.')
+        if runtime_parameters['additional_fasta'] is not None:
+            sequences = runtime_parameters['additional_fasta']
+            logging.info(
+                'Found additional file for primer generation {}'.format(
+                    sequences.name
+                ))
+            logging.warning(
+                'It is not possible to say whether a match found '
+                'by bowtie is expected or not if an additional file for '
+                'primer generation is passed.')
+        else:
+            sequences = runtime_parameters['fasta_file']
+            logging.info(
+                'No additional file with sequences for primer-generation '
+                'specified')
+        """
+        Extract sequence from FASTA file and get exact id of it as well
+        """
+        sequence, runtime_parameters['seq_id'] = parse_fasta(sequences,
+                                                             runtime_parameters[
+                                                                 'seq_id'])
+        if not sequence:
+            logging.error(
+                "Could not find sequence with given ID-Prefix. Aborting")
+            sys.exit(1)
+        logging.info('Successfully extracted sequence')
 
-    # # length of the insert between the primer pair
-    # product_size_range = None
-    # # are there any settings for primer3?
-    # if config.has_section('primer3'):
-    #     primer3_conf = config['primer3']
-    #     logging.info('Found settings for primer3')
-    #     logging.debug(
-    #         'primer3-settings: {}'.format(' '.join(primer3_conf.keys())))
-    #     if 'primer_product_size_range' in primer3_conf.keys():
-    #         product_size_range = primer3_conf['primer_product_size_range']
-    #
-    # else:
-    #     primer3_conf = None
-    #     logging.warning(
-    #         'Config contains no settings for primer3, '
-    #         'running primer3 with default settings.')
-    #
-    # seq_included_region = extract_included_region(config['default'])
-    #
-    # """
-    # Existing primer pairs specified via -p/--primerfiles will be read and bowtie
-    # run against them.
-    # """
-    # if not args.keep_primer:
-    #     logging.info('Generating new primer.')
-    #     if args.additionalFasta is not None:
-    #         sequences = args.additionalFasta
-    #         logging.info(
-    #             'Found additional file for primer generation {}'.format(
-    #                 sequences.name
-    #             ))
-    #         logging.warning(
-    #             'It is not possible to say whether a match found '
-    #             'by bowtie is expected or not if an additional file for '
-    #             'primer generation is passed.')
-    #     else:
-    #         sequences = args.FastaFile
-    #         logging.info(
-    #             'No additional file with sequences for primer-generation '
-    #             'specified')
-    #     """
-    #     Extract sequence from FASTA file and get exact id of it as well
-    #     """
-    #     sequence, seq_id = parse_fasta(sequences, args.sequence)
-    #     if not sequence:
-    #         logging.error(
-    #             "Could not find sequence with given ID-Prefix. Aborting")
-    #         sys.exit(1)
-    #     logging.info('Successfully extracted sequence')
-    #
-    #     """
-    #     Generate primer pairs, depending on extracted sequence, primer3
-    #     configuration and specified region for which primer shall be generated.
-    #     """
-    #     primer_dict = generate_primer(sequence, primer3_conf, args.primerfiles,
-    #                                   seq_included_region)
-    # else:
-    #     logging.info('Trying to parse existing primer from files specified'
-    #                  ' via -p/--primerfiles')
-    #     logging.warning('Calculations whether a hit is expected or not '
-    #                     'are based on the settings which would be used for '
-    #                     'normal primer generation: SEQUENCE_INCLUDED_* for '
-    #                     'the region, PRIMER_PRODUCT_SIZE_RANGE for size of '
-    #                     'a possible insert and -s/--sequence for prefix-'
-    #                     'matching with the reported id by bowtie in which '
-    #                     'sequence the hit was found.')
-    #     # store given sequence-parameter for prefix-matching with bowtie-results
-    #     if args.sequence is not None:
-    #         seq_id = args.sequence
-    #     else:
-    #         seq_id = None
-    #
-    #     primer_dict = parse_existing_primer(args.primerfiles)
-    #     # we did not generate any primer, therefore we do not have any sequence
-    #     # id to check whether a match is expected or not
-    # # is an already existing bowtie-index specified?
-    # if not args.index:
-    #     # no index available, so we have to create our own one
-    #     bowtie_index = setup_bowtie(args.FastaFile,
-    #                                 args.loglevel == logging.DEBUG, args.bowtie)
-    #     logging.info("No existing index for bowtie specified")
-    # else:
-    #     bowtie_index = args.index
-    #     logging.info("Using existing bowtie-index")
-    #
-    # bowtie_result = run_bowtie(bowtie_index, args.primerfiles, args.bowtie,
-    #                            args.loglevel == logging.WARNING,
-    #                            product_size_range, args.bowtie_output)
+        """
+        Generate primer pairs, depending on extracted sequence, primer3
+        configuration and specified region for which primer shall be generated.
+        """
+        primer_dict = generate_primer(sequence, primer3_options,
+                                      runtime_parameters['prefix'],
+                                      )
+    else:
+        logging.info('Trying to parse existing primer from files specified'
+                     ' via -p/--primerfiles')
+        logging.warning('Calculations whether a hit is expected or not '
+                        'are based on the settings which would be used for '
+                        'normal primer generation: SEQUENCE_INCLUDED_* for '
+                        'the region, PRIMER_PRODUCT_SIZE_RANGE for size of '
+                        'a possible insert and -s/--sequence for prefix-'
+                        'matching with the reported id by bowtie in which '
+                        'sequence the hit was found.')
 
-    # create empty list for results
-    # results = {}
-    # for primer_tuple in bowtie_result:
-    #     current_key, res = parse_bowtie_result(primer_tuple, config['default'],
-    #                                            primer_dict, seq_included_region,
-    #                                            args.additionalFasta is not None,
-    #                                            seq_id, args.keep_primer)
-    #     if res is not None:
-    #         results.setdefault(current_key, []).append(res)
-    #     else:
-    #         continue
-    #
-    # # get value defined in config or fallback otherwise
-    # max_number_matches = config['default'].getint('MAX_NUMBER_OF_MATCHES',
-    #                                               MAX_NUMBER_OF_MATCHES)
-    # logging.info('Maximal number of allowed matches set to {}'.format(
-    #     max_number_matches))
-    #
-    # # set output either to STDOUT or output file if specified by user
-    # if args.output is None:
-    #     logging.info('No file for output specified, writing to STDOUT.')
-    #     output = sys.stdout
-    # else:
-    #     logging.info('Output file specified, writing results to {}'.format(
-    #         args.output.name))
-    #     output = args.output
-    #
-    # # store intermediate all results which would be printed in output
-    # printable_res = []
-    # for key in sorted(results.keys()):
-    #     matches = results[key]
-    #     if len(matches) > max_number_matches:
-    #         logging.debug(
-    #             'Not printing results for {} because it has {} matches'.format(
-    #                 key, len(matches)
-    #             ))
-    #     else:
-    #         # add to intermediate results
-    #         printable_res.append(matches)
-    #
-    # output.write(RESULT_HEADER + '\n')
-    # for matches in sorted(printable_res, key=len):
-    #     # write results
-    #     output.write('\n'.join(matches))
-    #     # final newline at end of results
-    #     output.write('\n')
+        # primer_dict = parse_existing_primer(args.primerfiles)
+        # we did not generate any primer, therefore we do not have any sequence
+        # id to check whether a match is expected or not
+        # # is an already existing bowtie-index specified?
+        # if not args.index:
+        #     # no index available, so we have to create our own one
+        #     bowtie_index = setup_bowtie(args.FastaFile,
+        #                                 args.loglevel == logging.DEBUG, args.bowtie)
+        #     logging.info("No existing index for bowtie specified")
+        # else:
+        #     bowtie_index = args.index
+        #     logging.info("Using existing bowtie-index")
+        #
+        # bowtie_result = run_bowtie(bowtie_index, args.primerfiles, args.bowtie,
+        #                            args.loglevel == logging.WARNING,
+        #                            product_size_range, args.bowtie_output)
+
+        # create empty list for results
+        # results = {}
+        # for primer_tuple in bowtie_result:
+        #     current_key, res = parse_bowtie_result(primer_tuple, config['default'],
+        #                                            primer_dict, seq_included_region,
+        #                                            args.additionalFasta is not None,
+        #                                            seq_id, args.keep_primer)
+        #     if res is not None:
+        #         results.setdefault(current_key, []).append(res)
+        #     else:
+        #         continue
+        #
+        # # get value defined in config or fallback otherwise
+        # max_number_matches = config['default'].getint('MAX_NUMBER_OF_MATCHES',
+        #                                               MAX_NUMBER_OF_MATCHES)
+        # logging.info('Maximal number of allowed matches set to {}'.format(
+        #     max_number_matches))
+        #
+        # # set output either to STDOUT or output file if specified by user
+        # if args.output is None:
+        #     logging.info('No file for output specified, writing to STDOUT.')
+        #     output = sys.stdout
+        # else:
+        #     logging.info('Output file specified, writing results to {}'.format(
+        #         args.output.name))
+        #     output = args.output
+        #
+        # # store intermediate all results which would be printed in output
+        # printable_res = []
+        # for key in sorted(results.keys()):
+        #     matches = results[key]
+        #     if len(matches) > max_number_matches:
+        #         logging.debug(
+        #             'Not printing results for {} because it has {} matches'.format(
+        #                 key, len(matches)
+        #             ))
+        #     else:
+        #         # add to intermediate results
+        #         printable_res.append(matches)
+        #
+        # output.write(RESULT_HEADER + '\n')
+        # for matches in sorted(printable_res, key=len):
+        #     # write results
+        #     output.write('\n'.join(matches))
+        #     # final newline at end of results
+        #     output.write('\n')
 
 
 def parse_existing_primer(prefix: str) -> dict:
@@ -748,6 +772,26 @@ def parse_bowtie_result(primer_tuple: tuple,
         return None, None
 
 
+def default_bowtie_index_location(fasta_file_name: str) -> str:
+    """
+    Returns a potential path for a bowtie index for a given file name of a
+    FASTA file.
+    :param fasta_file_name: Filename for which the index should be created
+    :return: constructed path
+    """
+    import re
+    bowtie_index_dir = 'bowtie-index'
+    # create new directory for the index,
+    # no problem if specific folder already exists
+    os.makedirs(bowtie_index_dir, exist_ok=True)
+    # determine name for index from name of the
+    # FASTA-file containing the sequences
+    bowtie_index = "{index_dir}/{prefix}_bowtie".format(
+        index_dir=bowtie_index_dir,
+        prefix=re.split("/|\.", fasta_file_name)[-2])
+    return bowtie_index
+
+
 def setup_bowtie(fasta_file: '_io.TextIOWrapper', debug: bool,
                  bowtie_exec: str) -> str:
     """
@@ -840,9 +884,8 @@ def run_bowtie(bowtie_index: str, files_prefix: str, bowtie_exec: str,
     return res_tuple
 
 
-def generate_primer(sequence: str, primer3_config: configparser.SectionProxy,
-                    primer_file_prefix: str,
-                    seq_included_region: tuple) -> dict:
+def generate_primer(sequence: str, primer3_options: dict,
+                    primer_file_prefix: str, ) -> dict:
     """
     Calls the primer3-module with the settings and separates the results in
     left and right primer pairs.
@@ -854,41 +897,38 @@ def generate_primer(sequence: str, primer3_config: configparser.SectionProxy,
     primer shall be generated
     :return: A dictionary containing all primer pairs and their names
     """
-    primer3_config_dict = {}  # type: dict
-    # are any specific settings for primer3?
-    if primer3_config is not None:
-        try:
-            primer3.setP3Globals(primer3_config_dict)
-        except TypeError as message:
-            logging.error(
-                'Settings for primer3 contain following error: {}\nAborting'.format(
-                    message
-                ))
-            sys.exit(1)
+    import primer3
 
     # remove any newlines or anything else like that
     sequence = sequence.replace('\n', '').replace('\r', '')
 
-    (seq_begin, seq_end) = seq_included_region
-    # generate primers for the whole sequence?
-    if seq_begin == seq_end == 0:
-        logging.warning(
-            'Generating primers for the whole sequence as '
-            'requested since SEQUENCE_INCLUDED_END and _BEGIN are set to 0')
-        res = primer3.bindings.designPrimers({
-            'SEQUENCE_ID': 'mySequence',
-            'SEQUENCE_TEMPLATE': sequence,
-        })
-    else:
-        logging.info(
-            'Generating primers for region {}'.format((seq_begin, seq_end)))
-        res = primer3.bindings.designPrimers({
-            'SEQUENCE_ID': 'mySequence',
-            'SEQUENCE_TEMPLATE': sequence,
-            # give start of sequence and length
-            'SEQUENCE_INCLUDED_REGION': [seq_begin, seq_end - seq_begin]
+    product_size_range = list(primer3_product_size)
 
-        })
+    ok_region_list = [
+        # leftmost position
+        primer3_insert_pos[1] - primer3_product_size[1],
+        # leftmost overlap
+        primer3_product_size[1] - (primer3_insert_pos[1] - primer3_insert_pos[0]),
+        # right primer has to start after insert, end will be determined by product size
+        primer3_insert_pos[1], -1]
+
+    primer3_options.update(
+        {'PRIMER_PRODUCT_SIZE_RANGE': product_size_range}
+    )
+
+    primer3.bindings.setP3Globals(primer3_options)
+    # generate primers for the whole sequence?
+    logging.info(
+        'Product size: {}'.format(product_size_range)
+    )
+    res = primer3.bindings.designPrimers({
+        'SEQUENCE_ID': 'mySequence',
+        'SEQUENCE_TEMPLATE': sequence,
+        # give start of sequence and length
+        'SEQUENCE_PRIMER_PAIR_OK_REGION_LIST': ok_region_list,
+        'SEQUENCE_INCLUDED_REGION': [ok_region_list[0], primer3_insert_pos[0] + primer3_product_size[1] - ok_region_list[0]]
+
+    })
 
     primer_left = {}  # type: dict
     primer_right = {}  # type: dict
@@ -1008,7 +1048,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-p", "--primerfiles", type=str, help=arg_primerfiles_help,
-        metavar='prefix',
+        metavar='prefix', dest='prefix'
     )
     parser.add_argument(
         '-v', '--verbose', help="Be verbose by showing INFO messages.",
