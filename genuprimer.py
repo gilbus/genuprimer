@@ -13,6 +13,9 @@ import subprocess
 import sys
 
 # Constants
+'''
+
+'''
 RESULT_HEADER = "FWD_ID,REV_ID,MATCH_ID,FWD,REV,START,STOP,LENGTH,EXP"
 LOGGING_LEVEL = {'WARNING': logging.WARNING,
                  'INFO': logging.INFO,
@@ -79,7 +82,7 @@ arg_config_help = """Configfile with various parameters. Has to
 
 arg_additional_fasta_help = """An additional file containing the sequence for which primer
         shall be generated. First sequence inside of the file is taken if
-        not specified otherwise via '-s'.""",
+        not specified otherwise via '-s'."""
 
 arg_size_help = "Size range of the product including primers."
 
@@ -252,26 +255,6 @@ def parse_config_and_parameters(args: argparse.Namespace,
         logging.debug(new_value_for_key_msg.format(
             v=primer3_insert_pos, k='PRIMER_INSERT_POSITION'
         ))
-    global primer3_pair_ok_region_list
-    primer3_pair_ok_region_list = [
-        # leftmost position
-        primer3_insert_pos[1] - primer3_product_size[1],
-        # leftmost overlap
-        primer3_product_size[1] - (
-            primer3_insert_pos[1] - primer3_insert_pos[0]),
-        # right primer has to start after insert, end will be determined by product size
-        primer3_insert_pos[1],
-        # rightmost overlap
-        primer3_product_size[1] - (
-            primer3_insert_pos[1] - primer3_insert_pos[0]),
-    ]
-    global sequence_included_region
-    sequence_included_region = tuple(
-        # leftmost position
-        [primer3_pair_ok_region_list[0],
-         # rightmost position + rightmost overlap
-         primer3_insert_pos[1] + primer3_pair_ok_region_list[3]
-         ])
     for key in runtime_parameters:
         if key in args.keys() and args[key]:
             runtime_parameters[key] = args[key]
@@ -295,15 +278,17 @@ def parse_config_and_parameters(args: argparse.Namespace,
     logging.debug('Final parameter for primer3: {}'.format(primer3_options))
 
 
-def validate_options(region_keys: dict, insert_size: tuple, insert_pos: tuple,
-                     parse_options: dict, runtime_params: dict,
-                     ):
+def validate_options():
+    """
+    Checks whether the given values for some parameters make sense.
+    """
     # check whether we can use an existing bowtie index
     if runtime_parameters['index'] == 'bowtie-index':
         default_index = default_bowtie_index_location(
             runtime_parameters['fasta_file'].name)
         logging.debug(
-            'No existing bowtie index specified, looking at default path: {path}'.format(
+            'No existing bowtie index specified, '
+            'looking at default path: {path}'.format(
                 path=default_index))
         if os.path.isfile(default_index + '.1.ebwt'):
             logging.info('Found existing bowtie index probably created by us.')
@@ -329,8 +314,8 @@ def validate_options(region_keys: dict, insert_size: tuple, insert_pos: tuple,
         logging.error('Product size range must be positive')
         sys.exit(1)
     if not primer3_insert_pos:
-        if not CONFIG_REGION_KEYS['TARGET_POSITION_BEGIN'] or not \
-            CONFIG_REGION_KEYS['TARGET_POSITION_END']:
+        if not CONFIG_REGION_KEYS['TARGET_POSITION_BEGIN'] \
+            or not CONFIG_REGION_KEYS['TARGET_POSITION_END']:
             logging.error(
                 'No position of the product has been passed. Aborting')
             sys.exit(1)
@@ -344,6 +329,27 @@ def validate_options(region_keys: dict, insert_size: tuple, insert_pos: tuple,
         sys.exit(1)
     logging.debug('Selected Product Size: {}'.format(primer3_product_size))
     logging.debug('Selected Insert Position: {}'.format(primer3_insert_pos))
+    global primer3_pair_ok_region_list
+    primer3_pair_ok_region_list = [
+        # leftmost position
+        primer3_insert_pos[1] - primer3_product_size[1],
+        # leftmost overlap
+        primer3_product_size[1] - (
+            primer3_insert_pos[1] - primer3_insert_pos[0]),
+        # right primer has to start after insert, end will be determined by
+        # product size
+        primer3_insert_pos[1],
+        # rightmost overlap
+        primer3_product_size[1] - (
+            primer3_insert_pos[1] - primer3_insert_pos[0]),
+    ]
+    global sequence_included_region
+    sequence_included_region = tuple(
+        # leftmost position
+        [primer3_pair_ok_region_list[0],
+         # rightmost position + rightmost overlap
+         primer3_insert_pos[1] + primer3_pair_ok_region_list[3]
+         ])
 
 
 def main():
@@ -372,9 +378,7 @@ def main():
         logging.info('No config passed to program.')
     parse_config_and_parameters(args, config)
 
-    validate_options(
-        CONFIG_REGION_KEYS, primer3_product_size,
-        primer3_insert_pos, bowtie_parse_options, runtime_parameters)
+    validate_options()
 
     """
     Existing primer pairs specified via -p/--primerfiles will be read and bowtie
@@ -652,7 +656,8 @@ def parse_bowtie_result(primer_tuple: tuple,
         # the end of the primer; must not be lower than given value
         if values[-1].isdigit():
             if int(values[-1]) < bowtie_parse_options['LAST_MUST_MATCH']:
-                # only enable line below if you really want to understand process
+                # only enable line below if you really want to understand
+                # the process
                 # logging.debug(
                 #     'Failed because last_must_match not fulfilled: {}'.format(
                 #         values))
@@ -662,8 +667,8 @@ def parse_bowtie_result(primer_tuple: tuple,
                 return True
         # if last entry is a char there is no match, unless we do not care about
         # the entries at the end
-        elif values[-1].isalpha() and bowtie_parse_options[
-            'LAST_MUST_MATCH'] != 0:
+        elif values[-1].isalpha() and \
+                bowtie_parse_options['LAST_MUST_MATCH'] != 0:
             # only enable line below if you really want to understand process
             # logging.debug(
             #     'Failed because last char is str, '
@@ -760,10 +765,8 @@ def parse_bowtie_result(primer_tuple: tuple,
             We therefore look whether the given id is a prefix of the reported
             id.
             """
-            expected_hit = seq_included_region[0] <= \
-                           int(infos[3]) <= \
-                           int(infos[7]) <= \
-                           seq_included_region[1] and infos[2].startswith(
+            expected_hit = seq_included_region[0] <= int(infos[3]) <= int(
+                infos[7]) <= seq_included_region[1] and infos[2].startswith(
                 seq_id)
         else:
             """
@@ -816,8 +819,9 @@ def setup_bowtie(index_location: str, fasta_file_location: str, debug: bool,
                  bowtie_exec: str):
     """
     If no bowtie-index is specified we have to build it.
-    :param fasta_file: io-wrapper of the file with sequences that shall be
-    indexed, needed to determine name of index
+    :param index_location: Either user specified location of the bowtie index
+    or the default path constructed
+    :param fasta_file_location: path to the fasta file containing the sequences
     :param debug: whether debug logging is set on or off.
     :param bowtie_exec: str containing the path to bowtie executable.
     bowtie-build is supposed to be in the same folder.
@@ -864,12 +868,17 @@ def run_bowtie(bowtie_index: str, files_prefix: str, bowtie_exec: str,
             left, "-2", right, "--sam-nohead", '--minins', str(size_range[0]),
             '--maxins', str(size_range[1])]
     logging.info('Calling bowtie: {}'.format(args))
-    if silent:
-        args += ['--quiet']
-        res = subprocess.check_output(args).decode('utf-8').split('\n')
-    else:
-        logging.info('Bowtie result summary:')
-        res = subprocess.check_output(args).decode('utf-8').split('\n')
+    try:
+        if silent:
+            args += ['--quiet']
+            res = subprocess.check_output(args).decode('utf-8').split('\n')
+        else:
+            logging.info('Bowtie result summary:')
+            res = subprocess.check_output(args).decode('utf-8').split('\n')
+    except subprocess.CalledProcessError as e:
+        logging.error('Something went wrong during bowtie execution. Following '
+                      'error occured: {}'.format(e))
+        sys.exit()
 
     if bowtie_output:
         logging.info('Printing bowtie result to STDERR as requested by '
@@ -883,31 +892,37 @@ def run_bowtie(bowtie_index: str, files_prefix: str, bowtie_exec: str,
     return res_tuple
 
 
-def generate_primer(sequence: str, primer3_options: dict,
+def generate_primer(sequence: str, primer3_options_dict: dict,
                     primer_file_prefix: str, ) -> dict:
     """
     Calls the primer3-module with the settings and separates the results in
     left and right primer pairs.
     :param sequence: Sequence template for the primers
-    :param primer3_config: containing the settings for primer3
+    :param primer3_options_dict: Dictionary containing all user specified
+    settings for primer3.
     :param primer_file_prefix: prefix for the files where the primer pairs will
     be stored.
-    :param seq_included_region: tuple containing positions for which
-    primer shall be generated
     :return: A dictionary containing all primer pairs and their names
     """
-    import primer3
+    try:
+        import primer3
+    except ImportError:
+        logging.error('primer3-py is not installed but needed to communicate '
+                      'with primer3. You can find installation guides at '
+                      'https://libnano.github.io/primer3-py\n'
+                      'Aborting')
+        sys.exit(1)
 
     # remove any newlines or anything else like that
     sequence = sequence.replace('\n', '').replace('\r', '')
 
     product_size_range = list(primer3_product_size)
 
-    primer3_options.update(
+    primer3_options_dict.update(
         {'PRIMER_PRODUCT_SIZE_RANGE': product_size_range}
     )
 
-    primer3.bindings.setP3Globals(primer3_options)
+    primer3.bindings.setP3Globals(primer3_options_dict)
     # generate primers for the whole sequence?
     logging.info(
         'Product size: {}'.format(product_size_range)
