@@ -877,8 +877,8 @@ def run_bowtie(bowtie_index: str, files_prefix: str, bowtie_exec: str,
             res = subprocess.check_output(args).decode('utf-8').split('\n')
     except subprocess.CalledProcessError as e:
         logging.error('Something went wrong during bowtie execution. Following '
-                      'error occured: {}'.format(e))
-        sys.exit()
+                      'error occured: {}\nMaybe a corrupt index?'.format(e))
+        sys.exit(1)
 
     if bowtie_output:
         logging.info('Printing bowtie result to STDERR as requested by '
