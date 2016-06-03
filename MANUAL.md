@@ -35,7 +35,8 @@ Usage:
 ### Positional arguments
 
   `path_to_fasta_file`
-        File containing the sequences in valid FASTA format.
+        File containing the sequences in valid FASTA format. In the rest of the manual it will be
+        referred to as `FastaFile`.
  
 
 ### Optional arguments
@@ -45,35 +46,61 @@ Usage:
   `-s prefix_of_seq_id, --sequence prefix_of_seq_id`
         Partial ID of the sequence for which the primer shall be or have been generated. To identify
         the correct FASTA sequence prefix matching is applied and the first sequence where a match
-        is found is read from the file. If no primer generation is necessary, see `--keep-primer`,
-        the supplied value is used for bowtie. If a 
+        is found is read from the file. If no primer generation is performed, see `--keep-primer`,
+        the supplied value is used for bowtie to see whether a possible match is expected or not.
+        If no value is supplied the **first sequence found** is taken.
 
-  -c path_to_config, --config path_to_config
-                        Configfile with various parameters. Has to include a
-                        '[default]'-section at top of the file, otherwise it
-                        can not be parsed. (default: genuprimer.conf)
-  -a path_to_file, --additionalFasta path_to_file
-                        An additional file containing the sequence for which
-                        primer shall be generated. First sequence inside of
-                        the file is taken if not specified otherwise via '-s'.
-  --size min_size max_size
-                        Size range of the product including primers.
-  --pos begin end       Region between the primer which is not overlapped by
-                        them.
-  -i INDEX, --index INDEX
-                        If no bowtie-index is specified or found a new one
-                        will be generated for FastaFile. This option is
-                        directly forwarded to bowtie. (default: bowtie-
-                        index/{FastaFile})
-  -o [OUTPUT], --output [OUTPUT]
-                        Output where the results should be stored. Default is
-                        standard output. Results are written as comma
-                        separated values (.csv). (default: STDOUT)
-  --keep-primer         Set this option to start another run with the same
-                        primers from last run or some custom ones.
-  --last-must-match LAST_MUST_MATCH
-                        How many of the last bases of a primer have to match
-                        to consider it a hit? (default: 3)
+  `-c path_to_config, --config path_to_config`
+        Configfile with various parameters concerning the primer generation and the evaluation of
+        the bowtie result. See the Config-Section below for examples and instructions concerning the
+        format.
+        If a file `genuprimer.conf` is found and readable in the same directory it will be used.
+
+  `-a path_to_file, --additionalFasta path_to_file`
+        An additional FASTA file containing the sequence for which primer shall be generated. If
+        a file is omitted `-s prefix_of_seq_id` is used to identify the chosen sequence.
+        Additionally it is expected that the sequence chosen from `additionalFasta` is **not**
+        present in `FastaFile`. Since `bowtie` is applied against `FastaFile` every hit will
+        be marked as not expected.
+
+  `--size min_size max_size`
+        Size range of the product including primers. See Examples-Section below.
+
+  `--pos begin end`
+        Positions of the region of interest between the left and the right primer which is not 
+        overlapped by them. Must be absolute Positions inside the chosen Sequence.
+
+  `-i INDEX, --index INDEX`
+        If no bowtie-index is specified or found at the default location a new one will be
+        generated for FastaFile. This option is directly forwarded to bowtie. 
+        The default location is `bowtie-index/{generated_name}` where `generated_name` is calculated
+        by taking the value of `FastaFile`, splitting it at every occurrence of `/` or `.` and the
+        second last value is taken and `_bowtie` appended to it. See Examples-Section below.
+
+  `-o [OUTPUT], --output [OUTPUT]`
+        Output where the final results shall be stored. Default is STDOUT, e.g. printing to the
+        console. If an existing file is specified its contents will be overwritten.
+        Results are written as comma separated values (.csv). See Result-Section below.
+
+  -p prefix, --primerfiles prefix
+                        Prefix for the files where the primer pairs will be
+                        written to, if new ones are generated, or location of
+                        existing ones (see --keep-primer) with suffixes
+                        '_left.fas' and '_right.fas'. (default: genuprimer)
+
+  `--keep-primer`
+        If this option is omitted no new primers will be generated. Instead, existing primer pairs,
+        again located via `prefix` in combination with the suffixes, will be read and used for
+        `bowtie`. This option can be appended to any previous command where primer have been
+        generated but maybe you want to change the following settings concerning the evaluation of 
+        the `bowtie` results to get different final results.
+        Useful if you want to check some existing primer pairs or the generation takes very long.
+        If one of the files contains more primers than the other one the 'lonely' ones at the end of
+        the larger file will be dropped.
+
+  `--last-must-match LAST_MUST_MATCH`
+        How many of the last bases of a primer have to match to consider it a hit? (default: 3)
+
   --last-to-check LAST_TO_CHECK
                         How many of the last bases of a primer should be
                         checked considering LAST_MAX_ERROR. (default: 12)
@@ -88,11 +115,6 @@ Usage:
                         Append any custom options for primer3 in a valid
                         format for primer3-py. Options provided this way take
                         precedence over values from configfile.
-  -p prefix, --primerfiles prefix
-                        Prefix for the files where the primer pairs will be
-                        written to, if new ones are generated, or location of
-                        existing ones (see --keep-primer) with suffixes
-                        '_left.fas' and '_right.fas'. (default: genuprimer)
   -v, --verbose         Be verbose by showing INFO messages.
   -d, --debug           Print lots of DEBUG messages.
   --show-bowtie         Set this option to show the original results of
