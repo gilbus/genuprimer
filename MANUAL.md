@@ -21,16 +21,12 @@ found via `./genuprimer --help`.
 
 Usage: 
 
-`genuprimer.py [-h] [-s prefix_of_seq_id] [-c path_to_config]
-                     [-a path_to_file] [--size min_size max_size]
-                     [--pos begin end] [-i INDEX] [-o [OUTPUT]]
-                     [--keep-primer] [--last-must-match LAST_MUST_MATCH]
-                     [--last-to-check LAST_TO_CHECK]
-                     [--last-max-error LAST_MAX_ERROR]
-                     [-l LIMIT_NUMBER_OF_MATCHES]
-                     [--primer3 primer3_option value] [-p prefix] [-v] [-d]
-                     [--show-bowtie] [--bowtie path_to_bowtie_executable]
-                     path_to_fasta_file`
+`genuprimer.py [-h] [-s prefix_of_seq_id] [-c path_to_config][-a path_to_file]
+[--size min_size max_size][--pos begin end] [-i INDEX] [-o [OUTPUT]][--keep-primer]
+[--last-must-match LAST_MUST_MATCH][--last-to-check LAST_TO_CHECK]
+[--last-max-error LAST_MAX_ERROR][-l LIMIT_NUMBER_OF_MATCHES][--primer3 primer3_option value] 
+[-p prefix][-v][-d][--show-bowtie] [--bowtie path_to_bowtie_executable]
+path_to_fasta_file`
 
 ### Positional arguments
 
@@ -135,9 +131,112 @@ Usage:
         appending '-build' to the bowtie-call.
 
 ## Config
+A config file can be passed via `-c path_to_config`, see the beginning of the upper section.
+It is parsed by the [configparser](https://docs.python.org/3.4/library/configparser.html) and
+follows INI
+[syntax](https://docs.python.org/3.4/library/configparser.html#supported-ini-file-structure).
+It consists of two possible sections.
+
+### default
+Available options are:
+* `TARGET_POSITION_BEGIN`
+    Position of the begin of the region of interest, see `--pos`
+* `TARGET_POSITION_END`
+    End of the begin of the region of interest, see `--pos`
+* `PRIMER_PRODUCT_SIZE_MIN`
+    Minimal size of the product including the sizes of the primer, see `--size`
+* `PRIMER_PRODUCT_SIZE_MAX`
+    Maximal size of the product including the sizes of the primer, see `--size`
+* `LAST_MUST_MATCH`
+    Shortcut for same named command line option `--last-must-match`
+* `LAST_TO_CHECK`
+    Shortcut for same named command line option `--last-to-check`
+* `LAST_MAX_ERROR`
+    Shortcut for same named command line option `--last-max-error`
+
+### primer3
+Options which are passed to primer3-py containing criteria for the primer generation.
+
+#### Example
+The following example config will also be used in the Examples-Section
+
+    [default]
+    # These four values are mandatory and must be specified either via command line or here
+    TARGET_POSITION_BEGIN = 4709738
+    TARGET_POSITION_END   = 4710138
+    PRIMER_PRODUCT_SIZE_MIN = 500
+    PRIMER_PRODUCT_SIZE_MAX = 700
+
+    # These three values are having default values
+    LAST_MUST_MATCH = 3
+    LAST_TO_CHECK = 12
+    LAST_MAX_ERROR = 5
+    
+    # This section must not be defined necessarily but it is the only way to influence primer
+    # generation
+    [primer3]
+    PRIMER_OPT_SIZE = 20
+    PRIMER_INTERNAL_MAX_SELF_END = 8
+    PRIMER_MIN_SIZE = 10
+    PRIMER_MAX_SIZE = 30
+    PRIMER_OPT_TM = 60
+    PRIMER_MIN_TM = 57.0
+    PRIMER_MAX_TM = 63.0
+    PRIMER_MIN_GC = 20.0
+    PRIMER_MAX_GC = 80.0
+    PRIMER_MAX_POLY_X = 100
+    PRIMER_NUM_RETURN = 10
+    PRIMER_INTERNAL_MAX_POLY_X = 100
+    PRIMER_SALT_MONOVALENT = 50.0
+    PRIMER_DNA_CONC = 50.0
+    PRIMER_MAX_NS_ACCEPTED = 1
+    PRIMER_MAX_SELF_ANY = 12
+    PRIMER_MAX_SELF_END = 8
+    PRIMER_PAIR_MAX_COMPL_ANY = 12
+    PRIMER_PAIR_MAX_COMPL_END = 8
+    PRIMER_LIBERAL_BASE = 1
+
+Again, using a config file is **not** mandatory but simplifies the whole process.
 
 ## Result
+By using the config above with `PRIMER_NUM_RETURN = 10` ten primer pairs will be generated and
+possible matches found by bowtie are evaluated. **Not all matches found by bowtie are included
+here**, since these are evaluated, see the Bowtie-Section for more information. If a match is
+detected to be considerable it can be found here and all matches are also marked *expected* or 
+*not expected*. A match is considered expected if its position, size and name of the sequence where
+the match has been found comply with the settings used to generate the primer pairs.
+
+The final results will be written as comma-separated-values (csv).
+
+    FWD_ID,REV_ID,MATCH_ID,FWD,REV,START,STOP,LENGTH,EXP
+    PRIMER_LEFT_0_SEQUENCE,PRIMER_RIGHT_0_SEQUENCE,Chr1,GTGGTATTGCGTTCGCTTCG,TGGTGACTTAAGCGACTTGC,4709649,4710333,684,1
+
+One considerable match is represented by nine values:
+* `FWD_ID`
+    ID of the forward primer where the match has been found
+* `REV_ID`
+    bowtie is configured to look for matches where the left and right primer are in correct distance
+    to each other, see next section for further details. Therefore, one reverse primer also has to 
+    match..
+* `MATCH_ID`
+    ID of the sequence inside `FastaFile` where the match has been found.
+* `FWD`
+    Sequence of the forward match.
+* `REV`
+    Sequence of the reverse match.
+* `START`
+    Begin position of the match inside `FastaFile`
+* `END`
+    End position of the match inside `FastaFile`.
+* `LENGTH`
+    Length of the whole match flanked by the primer pair.
+* `EXP`
+    Whether a match is considered expected, see above explanation.
 
 ## Bowtie
+### Call
+bowtie is configured to consider the left and right primer as 'paired-end reads' and the `--size`
+values are also forwarded as `-I/--minins` and `-X/--maxins`.
 
+### Evaluation
 ## Examples
