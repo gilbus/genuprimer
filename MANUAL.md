@@ -82,11 +82,10 @@ Usage:
         console. If an existing file is specified its contents will be overwritten.
         Results are written as comma separated values (.csv). See Result-Section below.
 
-  -p prefix, --primerfiles prefix
-                        Prefix for the files where the primer pairs will be
-                        written to, if new ones are generated, or location of
-                        existing ones (see --keep-primer) with suffixes
-                        '_left.fas' and '_right.fas'. (default: genuprimer)
+  `-p prefix, --primerfiles prefix`
+        Prefix for the files where the primer pairs will be written to, if new ones are generated,
+        or location of existing ones, see next option, with suffixes '_left.fas' and '_right.fas'.
+        See Examples-Section below.
 
   `--keep-primer`
         If this option is omitted no new primers will be generated. Instead, existing primer pairs,
@@ -99,27 +98,46 @@ Usage:
         the larger file will be dropped.
 
   `--last-must-match LAST_MUST_MATCH`
-        How many of the last bases of a primer have to match to consider it a hit? (default: 3)
+        How many of the last bases of a primer have to match to consider it a hit? See
+        Bowtie-Section below. The default value is 3.
 
-  --last-to-check LAST_TO_CHECK
-                        How many of the last bases of a primer should be
-                        checked considering LAST_MAX_ERROR. (default: 12)
-  --last-max-error LAST_MAX_ERROR
-                        Maximum number of mismatches allowed to occur in the
-                        last LAST_TO_CHECK bases of a primer to consider it a
-                        hit. (default: 5)
-  -l LIMIT_NUMBER_OF_MATCHES, --limit-number-of-matches LIMIT_NUMBER_OF_MATCHES
-                        Maximum number of hits of a primer pair before it is
-                        omitted from the results. (default: 5)
-  --primer3 primer3_option value
-                        Append any custom options for primer3 in a valid
-                        format for primer3-py. Options provided this way take
-                        precedence over values from configfile.
-  -v, --verbose         Be verbose by showing INFO messages.
-  -d, --debug           Print lots of DEBUG messages.
-  --show-bowtie         Set this option to show the original results of
-                        bowtie, written to standard error output.
-  --bowtie path_to_bowtie_executable
-                        The bowtie executable if not in PATH. If needed
-                        bowtie-build is expected to be found via appending
-                        '-build' to bowtie. (default: bowtie)
+  `--last-to-check LAST_TO_CHECK`
+        How many of the last bases of a primer should be checked considering LAST_MAX_ERROR, see 
+        next option.See Bowtie-Section below. The default value is 12.
+
+  `--last-max-error LAST_MAX_ERROR`
+        Maximum number of mismatches allowed to occur in the last LAST_TO_CHECK bases of a primer to
+        consider it a hit.See Bowtie-Section below. The default value is 5.
+
+  `-l LIMIT_NUMBER_OF_MATCHES, --limit-number-of-matches LIMIT_NUMBER_OF_MATCHES`
+        Maximum number of hits of a primer pair before it is not shown in the results. The default
+        value is 5.
+
+  `--primer3 primer3_option value`
+        Append any custom options for primer3 in a valid format for primer3-py. Options provided 
+        this way take precedence over values from configfile. The values must be correct formatted
+        in python notation since they are directly forwarded to primer3-py.
+
+  `-v, --verbose`
+        Be verbose by showing INFO messages. These are just indicators what the program is
+        currently doing and activating them is highly recommended.
+
+  `-d, --debug`
+        Print lots of DEBUG messages. Useful if you do not understand actions of the program and why
+        it is executing them or how your config or command line arguments are parsed and evaluated.
+
+  `--show-bowtie`
+        Set this option to show the original results/output of bowtie, written to standard error 
+        output (STDERR).
+
+  `--bowtie path_to_bowtie_executable`
+        The bowtie executable if not in PATH. If needed bowtie-build is expected to be found via 
+        appending '-build' to the bowtie-call.
+
+## Config
+
+## Result
+
+## Bowtie
+
+## Examples
