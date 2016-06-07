@@ -313,7 +313,8 @@ it automatically since it is at the default location but we could also pass it.
 
 ### Check existing primer
 We want to check some existing primer for uniqueness which are stored in the files
-`custom_primer_left.fas` and `custom_primer_right.fas`, see `-p` explanation.
+`custom_primer_left.fas` and `custom_primer_right.fas`, see `-p` explanation, by using the
+`--keep-primer` option.
 
     custom_primer_left.fas:
     ______________________________________
@@ -334,4 +335,18 @@ We want to check some existing primer for uniqueness which are stored in the fil
     
     >gu0045
     TTCCAGTTGATCAGAACGCA
+
+The created primer pairs will be `(abg00005,ab8889), (uio88883,gu0045)` and `ui887` will be ignored.
+
+    `> python genuprimer.py araport/TAIR10_Chr.all.fasta --keep-primer -p custom_primer -c genuprimer_araport.conf -s 'Chr4' -o res2.csv`
+
+The important options here are `--keep-primer` to tell the program that we do not want to create new
+primer and `-p` to tell it where to find our custom primer.
     
+    FWD_ID,REV_ID,MATCH_ID,FWD,REV,START,STOP,LENGTH,EXP
+    abg00005,ab8889,Chr4,TCTACCACCTGACCAGTCACT,TCCAGTTGATCAGAACGCAA,4709778,4710399,621,1
+    uio88883,gu0045,Chr4,TCTACCACCTGACCAGTCACT,TTCCAGTTGATCAGAACGCA,4706165,4706847,682,0
+
+An excerpt of the results shows that the results are again marked as expected or not. **For this to be
+correct you have to adjust `--pos` and `--size`.**
+
