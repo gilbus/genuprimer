@@ -236,7 +236,102 @@ One considerable match is represented by nine values:
 ## Bowtie
 ### Call
 bowtie is configured to consider the left and right primer as 'paired-end reads' and the `--size`
-values are also forwarded as `-I/--minins` and `-X/--maxins`.
+values are also forwarded as `-I/--minins` and `-X/--maxins`. Therefore bowtie always reports two
+matches, for example the result of the upper example is constructed from following results:
 
+    PRIMER_LEFT_0_SEQUENCE  99  Chr1    4709649 255 20M =   4710313 684     GTGGTATTGCGTTCGCTTCG    IIIIIIIIIIIIIIIIIIII    XA:i:0  MD:Z:20 NM:i:0
+    PRIMER_RIGHT_0_SEQUENCE 147 Chr1    4710313 255 20M =   4709649 -684    GCAAGTCGCTTAAGTCACCA    IIIIIIIIIIIIIIIIIIII    XA:i:0  MD:Z:20 NM:i:0
+
+As you can see most of the values are just reformatted, one important change is that bowtie does
+always report the leftmost position of the match, so the position given in the result of the right 
+primer does mark the first base of it, so we add its length to this position to get the left and 
+right boundaries of the insert if this primer pair would be used.
 ### Evaluation
+The evaluation of the bowtie results finally decides whether a hit is included in the final results
+or not. It it based on the String representation of the mismatched reference bases in the alignment.
+See the [bowtie manual](http://bowtie-bio.sourceforge.net/manual.shtml)
+
+Taken from the example above `MD:Z:20` shows that we had a perfect alignment of length 20.
+`MD:Z:3T7T8` says that the last 8 bases were a match, than the reference had a `T`, than again 7
+matches, one mismatch and three matches.
+The three values used for the evaluation are the `LAST_*` options:
+* `LAST_MUST_MATCH`
+    How many of the last bases must be a perfect match?
+* `LAST_TO_CHECK`
+    How many of the last bases should be checked and in combination with the next option, how many
+    mismatches are allowed to occur maximally? The `LAST_MUST_MATCH`-last bases are always checked
+    even if `LAST_TO_CHECK < LAST_MUST_MATCH`.
+* `LAST_MAX_ERROR`
+    See above for explanation.
+
 ## Examples
+### Introduction
+Our initial directory structure will be the following, the sequences used are taken from
+[araport](https://www.araport.org/), the config is the one from above.
+
+    .
+    ├── araport
+    │   ├── README.md
+    │   └── TAIR10_Chr.all.fasta
+    ├── genuprimer_araport.conf
+    ├── genuprimer.py
+    └── MANUAL.md
+
+Our position of interest is around `Chr4:4709938`.
+
+### First run
+We start the program for the first using the default values wheresoever except for primer
+generation, since some values are written to the config inside the [primer3] section.
+    > python genuprimer.py araport/TAIR10_Chr.all.fasta -c genuprimer_araport.conf -s 'Chr4'
+Our new directory structure is:
+
+    .
+    ├── araport
+    │   ├── README.md
+    │   └── TAIR10_Chr.all.fasta
+    ├── bowtie-index
+    │   ├── all_bowtie.1.ebwt
+    │   ├── all_bowtie.2.ebwt
+    │   ├── all_bowtie.3.ebwt
+    │   ├── all_bowtie.4.ebwt
+    │   ├── all_bowtie.rev.1.ebwt
+    │   └── all_bowtie.rev.2.ebwt
+    ├── genuprimer_araport.conf
+    ├── genuprimer_left.fas
+    ├── genuprimer.py
+    ├── genuprimer_right.fas
+    └── MANUAL.md
+
+We had no existing bowtie index at the default location which would be `bowtie-index/all_bowtie`
+therefore a new one is created. See `-i` explanation how to determine the default location.
+`genuprimer_left.fas` and `genuprimer_right.fas` contain our created primer. Unfortunately the
+output has been written to STDOUT, let's change that.
+    > python genuprimer.py araport/TAIR10_Chr.all.fasta -c genuprimer_araport.conf -s 'Chr4' -o res.csv
+The next run is much faster since we do not have to rebuild our bowtie index. The program can detect 
+it automatically since it is at the default location but we could also pass it.
+    > python genuprimer.py araport/TAIR10_Chr.all.fasta -c genuprimer_araport.conf -s 'Chr4' -o res.csv -i bowtie-index/all_bowtie
+
+### Check existing primer
+We want to check some existing primer for uniqueness which are stored in the files
+`custom_primer_left.fas` and `custom_primer_right.fas`, see `-p` explanation.
+
+    custom_primer_left.fas:
+    ______________________________________
+    >abg00005
+    TCTACCACCTGACCAGTCACT
+    
+    >uio88883
+    TCTACCACCTGACCAGTCACT
+    
+    >ui887
+    ACTCTACCACCTGACCAGTCA
+
+
+    custom_primer_right.fas:
+    ______________________________________
+    >ab8889
+    TCCAGTTGATCAGAACGCAA
+    
+    >gu0045
+    TTCCAGTTGATCAGAACGCA
+    
