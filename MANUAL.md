@@ -233,6 +233,9 @@ One considerable match is represented by nine values:
 * `EXP`
     Whether a match is considered expected, see above explanation.
 
+**A primer pair which would have more than `LIMIT_NUMBER_OF_MATCHES` matches inside the final results
+will be skipped, see `-l` for more information.**
+
 ## Bowtie
 ### Call
 bowtie is configured to consider the left and right primer as 'paired-end reads' and the `--size`
@@ -246,6 +249,7 @@ As you can see most of the values are just reformatted, one important change is 
 always report the leftmost position of the match, so the position given in the result of the right 
 primer does mark the first base of it, so we add its length to this position to get the left and 
 right boundaries of the insert if this primer pair would be used.
+
 ### Evaluation
 The evaluation of the bowtie results finally decides whether a hit is included in the final results
 or not. It it based on the String representation of the mismatched reference bases in the alignment.
@@ -350,3 +354,42 @@ primer and `-p` to tell it where to find our custom primer.
 An excerpt of the results shows that the results are again marked as expected or not. **For this to be
 correct you have to adjust `--pos` and `--size`.**
 
+### Use an additional FastaFile
+Let's say we have the following directory structure and want to create primers for a sequence inside
+`TAIR10_Chr1.fasta` but want to make sure that they will not bind to any sequence in the other
+chromosomes, which are stored in the file `TAIR10_Chr2-.fasta`.
+
+    .
+    ├── araport
+    │   ├── README.md
+    │   ├── TAIR10_Chr1.fasta
+    │   ├── TAIR10_Chr2-.fasta
+    │   └── TAIR10_Chr.all.fasta
+    ├── bowtie-index
+    │   ├── all_bowtie.1.ebwt
+    │   ├── all_bowtie.2.ebwt
+    │   ├── all_bowtie.3.ebwt
+    │   ├── all_bowtie.4.ebwt
+    │   ├── all_bowtie.rev.1.ebwt
+    │   └── all_bowtie.rev.2.ebwt
+    ├── genuprimer_araport.conf
+    ├── genuprimer.py
+    └── MANUAL.md
+    
+    python genuprimer.py araport/TAIR10_Chr2-.fasta -c genuprimer_araport.conf -a araport/TAIR10_Chr1.fasta -v -o res3.csv --size 400 600 --pos 5863170 5863370
+
+So we told the program to generate the primer from the file containing chromosome 1 and to validate
+it against the other, see `-a` for additional information. We reused the previous config but changed
+`--size` and `--pos` which overwrite the respective settings inside the config which still contains
+our positional information for our region of interest inside Chr4 from the previous example.
+Our `bowtie-index` directory does now contain an additional index for `TAIR10_Chr2-.fasta`.
+
+### Pass primer3-parameters on command line
+By using the `--primer3` option on command line we are able to add or overwrite settings from the
+config, just like `--size` and `--pos` overwrite any existing values from the config.
+So if we would want to increase the number of generated primer pairs and adjust their minimal length
+we would use the following command.
+    > python genuprimer.py araport/TAIR10_Chr.all.fasta -c genuprimer_araport.conf -s 'Chr4' --primer3 PRIMER_NUM_RETURN 13 --primer3 PRIMER_MIN_SIZE = 15
+The `--primer3` option can be passed as often as necessary. Since using a config file is not
+mandatory, but recommended, this would another option to specify all `primer3` parameters found in
+the example inside the Config-Section
