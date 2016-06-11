@@ -1173,7 +1173,7 @@ TCCAGTTGATCAGAACGCAA
 
 &gt;gu0045
 TTCCAGTTGATCAGAACGCA</code></pre><p>The created primer pairs will be <code>(abg00005,ab8889), (uio88883,gu0045)</code> and <code>ui887</code> will be ignored.</p>
-<pre class="hljs"><code>`&gt; python genuprimer<span class="hljs-selector-class">.py</span> araport/TAIR10_Chr<span class="hljs-selector-class">.all</span><span class="hljs-selector-class">.fasta</span> --keep-primer -<span class="hljs-selector-tag">p</span> custom_primer -c genuprimer_araport<span class="hljs-selector-class">.conf</span> -s <span class="hljs-string">'Chr4'</span> -o res2.csv`</code></pre><p>The important options here are <code>--keep-primer</code> to tell the program that we do not want to create new
+<pre class="hljs"><code>&gt; python genuprimer<span class="hljs-selector-class">.py</span> araport/TAIR10_Chr<span class="hljs-selector-class">.all</span><span class="hljs-selector-class">.fasta</span> --keep-primer -<span class="hljs-selector-tag">p</span> custom_primer -c genuprimer_araport<span class="hljs-selector-class">.conf</span> -s <span class="hljs-string">'Chr4'</span> -o res2.csv</code></pre><p>The important options here are <code>--keep-primer</code> to tell the program that we do not want to create new
 primer and <code>-p</code> to tell it where to find our custom primer.</p>
 <pre class="hljs"><code>FWD_ID,REV_ID,MATCH_ID,FWD,REV,START,STOP,LENGTH,EXP
 abg00005,ab8889,Chr4,TCTACCACCTGACCAGTCACT,TCCAGTTGATCAGAACGCAA,<span class="hljs-number">4709778</span>,<span class="hljs-number">4710399</span>,<span class="hljs-number">621</span>,<span class="hljs-number">1</span>

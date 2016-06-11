@@ -342,7 +342,7 @@ We want to check some existing primer for uniqueness which are stored in the fil
 
 The created primer pairs will be `(abg00005,ab8889), (uio88883,gu0045)` and `ui887` will be ignored.
 
-    `> python genuprimer.py araport/TAIR10_Chr.all.fasta --keep-primer -p custom_primer -c genuprimer_araport.conf -s 'Chr4' -o res2.csv`
+    > python genuprimer.py araport/TAIR10_Chr.all.fasta --keep-primer -p custom_primer -c genuprimer_araport.conf -s 'Chr4' -o res2.csv
 
 The important options here are `--keep-primer` to tell the program that we do not want to create new
 primer and `-p` to tell it where to find our custom primer.
