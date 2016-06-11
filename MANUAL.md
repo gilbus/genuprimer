@@ -1,9 +1,10 @@
 # genuprimer
 
-genuprimer is a tool to generate primer for a given sequence and afterwards looking for any matches
-of them against a desired collection of sequences. It does so by using primer3 for generating the
-primer and bowtie for determining any matches. This gives you the possibility to check to whether
-the primer pairs are only binding inside one sequence and at their expected location only.
+genuprimer (from **gen**erate **u**nique **primer**) is a tool to generate primer for a given 
+sequence and afterwards looking for any matches of them against a desired collection of sequences. 
+It does so by using primer3 for generating the primer and bowtie for determining any matches. 
+This gives you the possibility to check to whether the primer pairs are only binding inside one 
+sequence and at their expected location only.
 
 ## Requirements
 
