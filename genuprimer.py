@@ -393,10 +393,6 @@ def main():
                 'Found additional file for primer generation {}'.format(
                     sequences.name
                 ))
-            logging.warning(
-                'It is not possible to say whether a match found '
-                'by bowtie is expected or not if an additional file for '
-                'primer generation is passed.')
         else:
             sequences = runtime_parameters['fasta_file']
             logging.info(
