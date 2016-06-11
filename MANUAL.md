@@ -55,9 +55,8 @@ path_to_fasta_file`
   `-a path_to_file, --additionalFasta path_to_file`
         An additional FASTA file containing the sequence for which primer shall be generated. If
         a file is omitted `-s prefix_of_seq_id` is used to identify the chosen sequence.
-        Additionally it is expected that the sequence chosen from `additionalFasta` is **not**
-        present in `FastaFile`. Since `bowtie` is applied against `FastaFile` every hit will
-        be marked as not expected.
+        If the same sequence is also included in `FastaFile` the corresponding hits will be marked
+        expected.
 
   `--size min_size max_size`
         Size range of the product including primers. See Examples-Section below.
@@ -114,11 +113,11 @@ path_to_fasta_file`
         this way take precedence over values from configfile. The values must be correct formatted
         in python notation since they are directly forwarded to primer3-py.
 
-  `-v, --verbose`
-        Be verbose by showing INFO messages. These are just indicators what the program is
-        currently doing and activating them is highly recommended.
+  `--silent`
+        Show no INFO and WARNINGS, just ERRORS. Note that this option does not influence the value
+        of `-o` or `--show-bowtie`.
 
-  `-d, --debug`
+  `--debug`
         Print lots of DEBUG messages. Useful if you do not understand actions of the program and why
         it is executing them or how your config or command line arguments are parsed and evaluated.
 
