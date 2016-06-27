@@ -684,7 +684,10 @@ def parse_bowtie_result(primer_tuple: tuple,
         bases_processed = 0
         # can we stop checking?
         while bases_processed <= bowtie_parse_options['LAST_TO_CHECK']:
-            current = values[-i]
+            try:
+                current = values[-i]
+            except IndexError:
+                break
             if current.isdigit():
                 bases_processed += int(current)
             else:
