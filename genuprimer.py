@@ -32,7 +32,7 @@ primer3_insert_pos = ()  # type: tuple
 
 bowtie_parse_options = {'LAST_MUST_MATCH': 3,
                         'LAST_TO_CHECK': 12,
-                        'LAST_MAX_ERROR': 5,
+                        'LAST_MAX_ERROR': 2,
                         'LIMIT_NUMBER_OF_MATCHES': 5}
 
 primer3_options = {}  # type: dict

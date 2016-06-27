@@ -103,7 +103,7 @@ path_to_fasta_file`
 
   `--last-max-error LAST_MAX_ERROR`
         Maximum number of mismatches allowed to occur in the last LAST_TO_CHECK bases of a primer to
-        consider it a hit.See Bowtie-Section below. The default value is 5.
+        consider it a hit.See Bowtie-Section below. The default value is 2.
 
   `-l LIMIT_NUMBER_OF_MATCHES, --limit-number-of-matches LIMIT_NUMBER_OF_MATCHES`
         Maximum number of hits of a primer pair before it is not shown in the results. The default
@@ -170,7 +170,7 @@ The following example config will also be used in the Examples-Section
     # These three values are having default values
     LAST_MUST_MATCH = 3
     LAST_TO_CHECK = 12
-    LAST_MAX_ERROR = 5
+    LAST_MAX_ERROR = 2
     
     # This section must not be defined necessarily but it is the only way to influence primer
     # generation
