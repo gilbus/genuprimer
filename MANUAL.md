@@ -286,7 +286,9 @@ Our position of interest is around `Chr4:4709938`.
 ### First run
 We start the program for the first using the default values wheresoever except for primer
 generation, since some values are written to the config inside the [primer3] section.
+
     > python genuprimer.py araport/TAIR10_Chr.all.fasta -c genuprimer_araport.conf -s 'Chr4'
+
 Our new directory structure is:
 
     .
@@ -310,9 +312,12 @@ We had no existing bowtie index at the default location which would be `bowtie-i
 therefore a new one is created. See `-i` explanation how to determine the default location.
 `genuprimer_left.fas` and `genuprimer_right.fas` contain our created primer. Unfortunately the
 output has been written to STDOUT, let's change that.
+
     > python genuprimer.py araport/TAIR10_Chr.all.fasta -c genuprimer_araport.conf -s 'Chr4' -o res.csv
+
 The next run is much faster since we do not have to rebuild our bowtie index. The program can detect 
 it automatically since it is at the default location but we could also pass it.
+
     > python genuprimer.py araport/TAIR10_Chr.all.fasta -c genuprimer_araport.conf -s 'Chr4' -o res.csv -i bowtie-index/all_bowtie
 
 ### Check existing primer
@@ -389,7 +394,9 @@ By using the `--primer3` option on command line we are able to add or overwrite 
 config, just like `--size` and `--pos` overwrite any existing values from the config.
 So if we would want to increase the number of generated primer pairs and adjust their minimal length
 we would use the following command.
+
     > python genuprimer.py araport/TAIR10_Chr.all.fasta -c genuprimer_araport.conf -s 'Chr4' --primer3 PRIMER_NUM_RETURN 13 --primer3 PRIMER_MIN_SIZE = 15
+
 The `--primer3` option can be passed as often as necessary. Since using a config file is not
 mandatory, but recommended, this would another option to specify all `primer3` parameters found in
 the example inside the Config-Section
