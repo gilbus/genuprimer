@@ -79,3 +79,5 @@ tmp/
 *.conf
 araport/
 Doku_Info/
+.autoenv*
+MANUAL.html
